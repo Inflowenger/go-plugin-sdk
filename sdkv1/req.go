@@ -3,6 +3,7 @@ package sdkv1
 import (
 	"fmt"
 
+	"github.com/bytedance/sonic"
 	"github.com/nats-io/nats.go"
 )
 
@@ -35,7 +36,11 @@ func (r *ActionRequest) Reject(cause string) {
 	r.msg.Respond([]byte(cause))
 }
 
-type Progress struct {
-	Progress int            `json:"progress"`
-	Details  map[string]any `json:"details"`
+func CastRequestTo[T any](msg []byte)(*RequestBody[T],error){
+	body:=RequestBody[T]{}
+	err:=sonic.Unmarshal(msg,&body)
+	if err!=nil{
+		return nil,err
+	}
+	return &body,nil
 }

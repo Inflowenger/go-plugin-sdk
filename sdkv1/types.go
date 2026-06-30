@@ -2,8 +2,7 @@ package sdkv1
 
 
 type Command string
-type EventType string
-type LogLevel string
+
 
 
 
@@ -15,16 +14,6 @@ const (
 )
 
 
-const (
-	EventTypeLog EventType = "log"
-)
 
-
-const (
-	LogLevelDebug LogLevel = "debug"
-	LogLevelInfo  LogLevel = "info"
-	LogLevelWarn  LogLevel = "warn"
-	LogLevelError LogLevel = "error"
-)
 
 

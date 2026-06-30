@@ -59,7 +59,7 @@ func (p *Plugin) settingsHandler() error {
 			// log.Println("no setting service defined")
 			// return nil
 		}
-		conn.Subscribe(p.makeSubject(p.settings.SubmitTo), func(msg *nats.Msg) {
+		conn.Subscribe(p.makeActionSubject(p.settings.SubmitTo), func(msg *nats.Msg) {
 			if p.settings.SubmitHandler == nil {
 				msg.Respond([]byte(`{"status":"not implemented"}`))
 				return
@@ -96,7 +96,7 @@ func (p *Plugin) metaFunchandler() {
 	}
 
 	for _, metafn := range p.metaFn {
-		_, err := conn.Subscribe(p.makeSubject(metafn.Method), func(msg *nats.Msg) {
+		_, err := conn.Subscribe(p.makeActionSubject(metafn.Method), func(msg *nats.Msg) {
 			res := metafn.RequestHandler(Request{Msg: msg, Plugin: p})
 			resByte, err := sonic.Marshal(res)
 			if err != nil {
@@ -107,10 +107,10 @@ func (p *Plugin) metaFunchandler() {
 			msg.Respond(resByte)
 		})
 		if err != nil {
-			log.Printf("subscribe error: %s on %s\n", err.Error(), p.makeSubject(metafn.Method))
+			log.Printf("subscribe error: %s on %s\n", err.Error(), p.makeActionSubject(metafn.Method))
 			return
 		}
-		log.Printf("Meta Function Service : %s", p.makeSubject(metafn.Method))
+		log.Printf("Meta Function Service : %s", p.makeActionSubject(metafn.Method))
 	}
 }
 
@@ -164,7 +164,7 @@ func (p *Plugin) actionsHandler() {
 
 }
 
-func (p *Plugin) makeSubject(action string) string {
+func (p *Plugin) makeActionSubject(action string) string {
 
 	return fmt.Sprintf("inflow.v1.%s.%s", p.PluginId, action)
 }
