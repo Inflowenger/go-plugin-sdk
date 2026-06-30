@@ -25,8 +25,8 @@ type Action struct {
 }
 
 type Meta struct {
-	Method         string                     `json:"method"`
-	RequestHandler func(RequestBody) Response `json:"-"`
+	Method         string                 `json:"method"`
+	RequestHandler func(Request) Response `json:"-"`
 }
 
 // Icon represents an icon for an action
@@ -38,13 +38,13 @@ type Icon struct {
 // FormBuilder represents the action form configuration
 // Subject: inflow.v1.<PLUGIN_ID>.<ACTION>.@form
 type FormBuilder struct {
-	SubmitTo string `json:"submit_to"` // name of a meta func for live validation
+	SubmitTo   string `json:"submit_to"` // name of a meta func for live validation
 	Jsonui     string `json:"jsonui"`
 	Jsonschema string `json:"jsonschema"`
 }
-type Settings struct{
+type Settings struct {
 	FormBuilder
-	SubmitHandler func(RequestBody)Response
+	SubmitHandler func(Request) Response
 }
 type CommandPayload struct {
 	Progress int            `json:"progress" bson:"progress"`
@@ -68,8 +68,8 @@ type ActionRequestContent struct {
 	Registry map[string]any `json:"_registry"`
 	Body     map[string]any `json:"body"`
 }
-type RequestBody struct {
-	Data    []byte  // data includes action body and requirements that set as settings
-	Header  nats.Header
-	Subject string
+type Request struct {
+	Msg *nats.Msg
+	Plugin IPlugin
+
 }

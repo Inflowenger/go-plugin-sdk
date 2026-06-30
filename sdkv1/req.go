@@ -1,7 +1,7 @@
 package sdkv1
 
 import (
-	"context"
+	"fmt"
 
 	"github.com/nats-io/nats.go"
 )
@@ -13,12 +13,6 @@ const (
 	REJECT ReqStatus = -1
 )
 
-type Job struct {
-	Action   string
-	Progress Progress
-	JobId    string
-	ctx      context.Context
-}
 type Response struct {
 	Data  map[string]any `json:"data"`
 	Error any            `json:"error"`
@@ -28,18 +22,15 @@ type ActionRequest struct {
 	JobId  string
 	Action string
 	status ReqStatus
-	Body   RequestBody
+	Req    Request
 	msg    *nats.Msg
 }
 
 func (r *ActionRequest) Accept() Job {
-	r.msg.Respond([]byte(`{}`))
-	return Job{Action: r.Action, JobId: r.JobId}
+	r.msg.Respond([]byte(fmt.Sprintf(`{"jobId":"%s"}`, r.JobId)))
+	return Job{plugin:r.Req.Plugin,Action: r.Action, JobId: r.JobId}
 }
-func (r *ActionRequest) AcceptWithCtx(ctx context.Context) Job {
-	r.msg.Respond([]byte(`{}`))
-	return Job{Action: r.Action, JobId: r.JobId, ctx: ctx}
-}
+
 func (r *ActionRequest) Reject(cause string) {
 	r.msg.Respond([]byte(cause))
 }

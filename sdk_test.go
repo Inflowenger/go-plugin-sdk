@@ -16,9 +16,9 @@ func TestInit(t *testing.T) {
 	}
 	p.Intro(sdkv1.PluginIntro{Name: "Mapper",Author: "inflow Dev. Team",Version: "v0.0.1"})
 	fmt.Println(p)
-	p.AddAction(sdkv1.Action{Method: "call",RequestHandler: func(ar sdkv1.ActionRequest) {
+	p.AddAction(sdkv1.Action{Method: "get.acc.list",RequestHandler: func(ar sdkv1.ActionRequest) {
 		job:=ar.Accept()
-		fmt.Println(job)
+		job.Done(map[string]any{"p1_res":12000.111})
 	
 	}})
 	p.Start()
