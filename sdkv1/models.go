@@ -1,8 +1,6 @@
 package sdkv1
 
-import (
-	"github.com/nats-io/nats.go"
-)
+import "github.com/nats-io/nats.go"
 
 // PluginIntro represents the plugin introduction response
 // Subject: inflow.v1.<PLUGIN_ID>.@intro
@@ -20,7 +18,7 @@ type Action struct {
 	Description    string              `json:"description"`
 	Title          string              `json:"title"`
 	Icon           Icon                `json:"icon"`
-	RequestHandler func(ActionRequest) `json:"-"`
+	RequestHandler JobHandler `json:"-"`
 	Form           FormBuilder         `json:"form"`
 }
 
@@ -50,6 +48,7 @@ type CommandPayload struct {
 	Progress int            `json:"progress" bson:"progress"`
 	Frame    Frame          `json:"frame" bson:"frame"`
 	Details  map[string]any `json:"details"`
+	CommitOn string         `json:"commit_on"`
 }
 
 type Frame struct {
@@ -69,12 +68,12 @@ type ActionRequestContent struct {
 	Body     map[string]any `json:"body"`
 }
 type Request struct {
-	Msg *nats.Msg
+	Data    []byte
+	Header nats.Header
 	Plugin IPlugin
-
 }
 
 type RequestBody[T any] struct {
 	Registry map[string]any `json:"_registry"`
-	Body     T `json:"body"`
+	Body     T              `json:"body"`
 }

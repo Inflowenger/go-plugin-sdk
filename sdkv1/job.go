@@ -3,6 +3,7 @@ package sdkv1
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/bytedance/sonic"
 	"github.com/nats-io/nats.go"
@@ -12,11 +13,12 @@ type Job struct {
 	plugin IPlugin
 	Action string
 	JobId  string
+	Req Request
 }
 
-func (j *Job) Done(data map[string]any) any {
+func (j *Job) Done(data map[string]any,key ...string) any {
 
-	return j.Command(ProgressCommand, CommandPayload{Progress: 100, Details: data})
+	return j.Command(ProgressCommand, CommandPayload{Progress: 100, Details: data,CommitOn: strings.Join(key,".")})
 
 }
 func (j *Job) DoneWithError(error string) any {
@@ -53,6 +55,22 @@ func (j *Job) CmdStopFlow() any {
 	}
 	return msg.Data
 }
+func (j *Job) CmdSetOnPath(jsonPath string, data map[string]any) any {
+	dataContent:=JobBodyContent{
+		CommitOn: jsonPath,
+		Details: data,
+	}
+	sub := j.makeJobSubject(JobCommandCommit)
+	bData, err := sonic.Marshal(dataContent)
+	if err != nil {
+		return err
+	}
+	msg, err := j.send(sub, bData)
+	if err != nil {
+		return err
+	}
+	return msg.Data
+}
 func (j *Job) Command(cmd Command, data CommandPayload) any {
 
 	sub := j.makeJobSubject(cmd)
@@ -76,4 +94,3 @@ func (j *Job) send(sub string, data []byte) (*nats.Msg, error) {
 func (j *Job) makeJobSubject(cmd Command) string {
 	return fmt.Sprintf("inflow.cpu.%s.%s.%s", j.plugin.GetPluginId(), j.JobId, cmd)
 }
-

@@ -3,6 +3,8 @@ package sdkv1
 import (
 	"fmt"
 	"log"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/bytedance/sonic"
@@ -64,7 +66,8 @@ func (p *Plugin) settingsHandler() error {
 				msg.Respond([]byte(`{"status":"not implemented"}`))
 				return
 			}
-			res := p.settings.SubmitHandler(Request{Msg: msg, Plugin: p})
+			
+			res := p.settings.SubmitHandler(Request{Data: slices.Clone(msg.Data),Header:maps.Clone(msg.Header) , Plugin: p})
 			resByte, err := sonic.Marshal(res)
 			if err != nil {
 				fmt.Println(err.Error())
@@ -97,7 +100,7 @@ func (p *Plugin) metaFunchandler() {
 
 	for _, metafn := range p.metaFn {
 		_, err := conn.Subscribe(p.makeActionSubject(metafn.Method), func(msg *nats.Msg) {
-			res := metafn.RequestHandler(Request{Msg: msg, Plugin: p})
+			res := metafn.RequestHandler(Request{Data: slices.Clone(msg.Data),Header:maps.Clone(msg.Header), Plugin: p})
 			resByte, err := sonic.Marshal(res)
 			if err != nil {
 				fmt.Println(err.Error())
@@ -151,9 +154,8 @@ func (p *Plugin) actionsHandler() {
 				return
 			}
 			jId := uuid.New().String()
-			newReq := ActionRequest{ msg: msg, JobId: jId, Action: action.Method, Req: Request{Msg: msg, Plugin: p}}
-			action.RequestHandler(newReq)
-
+			newReq := ActionRequest{ JobId: jId, Action: action.Method, Req: Request{Data: slices.Clone(msg.Data),Header:maps.Clone(msg.Header), Plugin: p}}
+			WithJobHandler(action.RequestHandler)(newReq,msg)
 		})
 		if err != nil {
 			log.Printf("subscribe error: %s on %s\n", err.Error(), p.makeActionCpu(action.Method))
