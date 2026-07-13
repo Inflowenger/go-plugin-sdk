@@ -16,8 +16,8 @@ Inflowenger is a **runtime for context processing**. Its model has four parts:
 | **Adapters**  | The edges. They connect the runtime to the outside world. |
 
 By analogy to a computer: a **Fractal** is the process/OS, a **Workflow** is a
-program, **Context** is memory, and **Plugins / extrinsic nodes** are the
-extensions, drivers, and interrupts.
+program, **Context** is memory, and **Plugins** are the extensions, drivers, and
+interrupts.
 
 A workflow is a graph of **nodes**. Inflowenger provides a small set of
 **primitive nodes**; higher-level node types are compiled down to those

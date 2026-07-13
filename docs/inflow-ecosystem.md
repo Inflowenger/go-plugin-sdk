@@ -34,7 +34,7 @@ The OS analogy the site draws explicitly:
 - Traditional Computer ↔ **Fractal Runtime** (process instance; a node can be an
   embedded flow)
 - Operating System ↔ **Inflowenger Runtime**
-- Extensions, drivers & interrupts ↔ **Plugins, extrinsic nodes, Fractal instances**
+- Extensions, drivers & interrupts ↔ **Plugins, Fractal instances**
 
 ## Node taxonomy _(to expand — this is the promised node-types doc's home)_
 
@@ -42,13 +42,15 @@ The OS analogy the site draws explicitly:
 - **Higher-level nodes** — compile *down* to primitives.
 - **Plugin node** — does **not** compile to primitives; it's a live external
   process the Fractal calls into. The most mature, full-featured, extensible node
-  type. Everything in this SDK is about this node.
-- **Extrinsic nodes** — referenced alongside plugins as an extension mechanism.
-  _(to verify: relationship between "plugin" and "extrinsic node")_
+  type. Everything in **this SDK** is about this node.
+
+> The full node-types taxonomy (the other kinds, which are primitive vs. compiled
+> higher-level, and how compilation to primitives works) belongs in the dedicated
+> node-types doc, sourced from their owning repos — not here. This file only needs
+> to place the **Plugin** node, which is what this SDK implements.
 
 > TODO for the full node doc: enumerate the primitive nodes, describe how
-> compilation to primitives works, and place plugin/extrinsic nodes precisely in
-> the taxonomy.
+> compilation to primitives works, and place the plugin node in the taxonomy.
 
 ## Platform components (from `getting-started`)
 

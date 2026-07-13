@@ -245,12 +245,46 @@ Full details, semantics, and the underlying subjects are in
 
 | Doc | What's in it |
 |-----|--------------|
+| [cookbook.md](cookbook.md) | **Start here to build one** — a task-organized cookbook: scaffold, actions, input, progress, context, forms, recipes, ship checklist. |
 | [docs/architecture.md](docs/architecture.md) | Where the plugin node sits in Inflowenger (Context / Workflows / Fractals / Adapters), and the plugin lifecycle. |
 | [docs/protocol-inflowv1.md](docs/protocol-inflowv1.md) | The `inflowv1` wire protocol: every NATS subject, request/response shape, and the request↔job handshake. |
 | [docs/jobs-and-commands.md](docs/jobs-and-commands.md) | The `Job` API in depth — progress, done, context read/write, stop. |
 | [docs/form-builder.md](docs/form-builder.md) | Building action & settings UIs with JSON Forms + `x-inflow-ui`. |
 | [docs/examples.md](docs/examples.md) | Annotated walkthrough of the `HTTP.CALL` and `RPC` sample plugins. |
 | [docs/inflow-ecosystem.md](docs/inflow-ecosystem.md) | Working notes on the broader Inflowenger platform (seed for the full ecosystem doc). |
+
+---
+
+## Building with an AI assistant (Agent Skill)
+
+If you build your plugin with an AI coding agent (Claude Code / the Claude Agent
+SDK, or any tool that supports **Agent Skills** — `SKILL.md` files), this repo ships
+a ready-made **skill** that teaches the agent how to use this SDK correctly —
+scaffolding, the one-`Done`-per-path rule, `CastRequestTo`, context commands, forms,
+and the known gotchas.
+
+It lives at **[`skills/inflow-plugin/SKILL.md`](skills/inflow-plugin/SKILL.md)**: a
+`SKILL.md` with frontmatter (a `description` that tells the agent *when* to use it)
+plus agent-directed instructions. It's the machine-facing counterpart to the
+human [`cookbook.md`](cookbook.md).
+
+**How to use it.** Because `go-plugin-sdk` is imported as a library, you install the
+skill in **your own plugin project** (not here) so your agent auto-loads it there:
+
+```bash
+# from the root of the repo where you're building your plugin
+mkdir -p .claude/skills
+# copy the skill folder out of the SDK (adjust the source path to your checkout / module cache)
+cp -r "$(go env GOMODCACHE)"/github.com/\!inflowenger/go-plugin-sdk@*/skills/inflow-plugin .claude/skills/
+```
+
+Or just grab it from GitHub:
+[`skills/inflow-plugin/SKILL.md`](https://github.com/Inflowenger/go-plugin-sdk/tree/main/skills/inflow-plugin).
+
+Once it's under `.claude/skills/inflow-plugin/`, a compatible agent discovers it by
+its `description` and pulls it in whenever you ask it to build or extend an inflow
+plugin — no need to paste docs into the prompt. (The skill's own links point at the
+SDK's GitHub docs, so they keep working after you copy it out.)
 
 ---
 
@@ -284,7 +318,12 @@ go-plugin-sdk/
 │   └── dotenv.go          env loading
 ├── nats/
 │   └── natsBox.go         NATS connection from base64 decorated credentials
-└── sdkv1_test.go          runnable sample plugins
+├── sdkv1_test.go          runnable sample plugins
+├── cookbook.md            human-facing build guide
+├── docs/                  concept & protocol docs
+└── skills/
+    └── inflow-plugin/
+        └── SKILL.md       Agent Skill — copy into your plugin project's .claude/skills/
 ```
 
 ---
