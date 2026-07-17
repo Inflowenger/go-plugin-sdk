@@ -44,6 +44,17 @@ type Settings struct {
 	FormBuilder
 	SubmitHandler func(Request) Response
 }
+// CommandPayload is the body shipped with every in-job progress command
+// (Job.Progress / Job.Done / Job.DoneWithError). Progress selects the stage:
+//
+//   - Frame  (Progress in [1,99]): a non-terminal update. The core renders
+//     Frame on the node — a pie chart from Progress plus the frame's title and
+//     content. Details may carry partial data.
+//   - Result (Progress 100): the terminal payload. Details is committed to the
+//     node's scope, at CommitOn when set. A failed job (DoneWithError) sends its
+//     reason as Details["error"].
+//
+// The core mirrors this as models.CommandPayload — keep the two in sync.
 type CommandPayload struct {
 	Progress int            `json:"progress" bson:"progress"`
 	Frame    Frame          `json:"frame" bson:"frame"`
@@ -51,11 +62,20 @@ type CommandPayload struct {
 	CommitOn string         `json:"commit_on"`
 }
 
+// Frame is the human-readable content of a sub-100 progress update: Title labels
+// the frame, Content is the streamed status body shown on the node. Meta is a
+// reserved, open bag for frontend-effective extras the frame wants to render
+// (e.g. an "items" list) without changing this contract; leave it nil when
+// unused.
 type Frame struct {
-	Title   string `json:"title" bson:"title"`
-	Content string `json:"content" bson:"content"`
+	Title   string         `json:"title" bson:"title"`
+	Content string         `json:"content" bson:"content"`
+	Meta    map[string]any `json:"meta,omitempty" bson:"meta,omitempty"`
 }
 
+// JobBodyContent is the init response (it assigns the JobId subsequent commands
+// are addressed to) and the body of a bare commit command (Job.CmdSetOnPath).
+// On init failure the reason is carried as Details["error"].
 type JobBodyContent struct {
 	JobId    string         `json:"jobId"`
 	Progress int            `json:"progress"`

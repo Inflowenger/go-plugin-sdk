@@ -50,6 +50,27 @@ job.Progress(10, sdkv1.Frame{Title: "init step", Content: "task is starting"})
 job.Progress(50, sdkv1.Frame{Title: "working", Content: "halfway there"})
 ```
 
+A `Frame` has three fields:
+
+| Field     | Type             | Purpose                                                                 |
+| --------- | ---------------- | ----------------------------------------------------------------------- |
+| `Title`   | `string`         | Short label for the frame.                                              |
+| `Content` | `string`         | Streamed status body shown on the node.                                 |
+| `Meta`    | `map[string]any` | Reserved, open bag for frontend-effective extras (e.g. an `items` list) carried through untouched. Omit when unused. |
+
+```go
+job.Progress(75, sdkv1.Frame{
+    Title:   "indexing",
+    Content: "3 of 4 files",
+    Meta:    map[string]any{"items": []string{"a.go", "b.go", "c.go"}},
+})
+```
+
+On the wire a sub-100 update is `{progress, frame}` (see the summary table below).
+It may also carry `details` — a partial payload the core forwards alongside the
+frame for jobs that surface intermediate data; at `100`, `details` instead is the
+terminal payload committed to the node.
+
 Progress is advisory feedback; it does not, by itself, complete the job — only
 reaching 100 (via `Done`/`DoneWithError`) does.
 
