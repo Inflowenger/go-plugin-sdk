@@ -39,6 +39,15 @@ func (j *Job) CmdGetCurrentScope() any {
 	}
 	return msg.Data
 }
+func (j *Job) CmdNextFilter(nextsTags []string) any {
+	sub := j.makeJobSubject(JobCommandNextTags)
+	msg, err := j.send(sub, []byte(strings.Join(nextsTags,",")))
+	if err != nil {
+		return err
+	}
+	return msg.Data
+}
+
 func (j *Job) CmdGetScope(jsonPath string) any {
 	sub := j.makeJobSubject(ContextPathCommand)
 	msg, err := j.send(sub, []byte(jsonPath))

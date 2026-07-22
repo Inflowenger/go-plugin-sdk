@@ -8,4 +8,5 @@ const (
 	ContextCurrentCommand Command = "context/current"
 	ContextPathCommand    Command = "context/path"
 	JobCommandCommit      Command = "commit"
+	JobCommandNextTags    Command = "next_tags"
 )

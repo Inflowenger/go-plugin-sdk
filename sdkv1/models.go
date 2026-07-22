@@ -14,17 +14,28 @@ type PluginIntro struct {
 // PluginAction represents a single plugin action
 // Subject: inflow.v1.<PLUGIN_ID>.@actions
 type Action struct {
-	Method         string              `json:"method"`
-	Description    string              `json:"description"`
-	Title          string              `json:"title"`
-	Icon           Icon                `json:"icon"`
-	RequestHandler JobHandler `json:"-"`
-	Form           FormBuilder         `json:"form"`
+	Method         string      `json:"method"`
+	Description    string      `json:"description"`
+	Title          string      `json:"title"`
+	Icon           Icon        `json:"icon"`
+	RequestHandler JobHandler  `json:"-"`
+	Form           FormBuilder `json:"form"`
 }
 
+// Meta is a live, request/response helper method a plugin exposes OUTSIDE the
+// job lifecycle. Unlike an Action (which spawns a Job and reports progress), a
+// meta method is a plain RPC: the frontend/back-end calls it synchronously to
+// fetch data it needs to build a dialog *before* a job runs — e.g. the MCP
+// node's "list tools" call, which connects to a server and returns its tools so
+// the drawer can render one output port / arg form per tool.
+//
+// Subject: inflow.v1.<PLUGIN_ID>.<Method>. The handler returns any JSON-able
+// value (a struct, a slice, a map) and the SDK marshals it verbatim — so a meta
+// method can answer with a bare array (e.g. []McpTool) when that is the shape
+// the caller expects, not only the {data,error} Response envelope.
 type Meta struct {
-	Method         string                 `json:"method"`
-	RequestHandler func(Request) Response `json:"-"`
+	Method         string            `json:"method"`
+	RequestHandler func(Request) any `json:"-"`
 }
 
 // Icon represents an icon for an action
@@ -44,6 +55,7 @@ type Settings struct {
 	FormBuilder
 	SubmitHandler func(Request) Response
 }
+
 // CommandPayload is the body shipped with every in-job progress command
 // (Job.Progress / Job.Done / Job.DoneWithError). Progress selects the stage:
 //
@@ -88,7 +100,7 @@ type ActionRequestContent struct {
 	Body     map[string]any `json:"body"`
 }
 type Request struct {
-	Data    []byte
+	Data   []byte
 	Header nats.Header
 	Plugin IPlugin
 }

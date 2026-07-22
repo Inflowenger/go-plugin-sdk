@@ -138,6 +138,23 @@ job.CmdStopFlow()
 Use it for guard conditions — a validation failure or a business rule that should
 abort everything downstream, not just fail this one node.
 
+## Routing outbound ports at runtime
+
+A node can have several **outbound ports**, each carrying a route **tag**. By
+default the flow follows every port; `CmdNextFilter` narrows that to just the
+tag(s) you name, so downstream branching is decided at runtime by your handler:
+
+```go
+// Fire only the ports tagged "approved" and "notify" next; others are skipped.
+job.CmdNextFilter([]string{"approved", "notify"})
+```
+
+The canonical use is **LLM tool routing**: an LLM node binds one function per
+outbound port (the function name *is* the port tag), and when the model answers
+with a tool call the handler routes the flow out of the matching port —
+`job.CmdNextFilter([]string{calledFunctionName})`. Call it before `Done`; skip it
+entirely to let the flow follow its default route.
+
 ## Command reference
 
 | Method | Command subject suffix | Payload → | Returns |
@@ -148,6 +165,7 @@ abort everything downstream, not just fail this one node.
 | `CmdGetCurrentScope()`      | `context/current` | — | context bytes |
 | `CmdGetScope(jsonPath)`     | `context/path`    | `jsonPath` | context bytes |
 | `CmdSetOnPath(jsonPath, m)` | `commit`          | `{commit_on, details}` | ack |
+| `CmdNextFilter(tags)`       | `next_tags`       | comma-joined tags | ack |
 | `CmdStopFlow()`             | `stop`            | — | ack |
 
 ## A complete handler
