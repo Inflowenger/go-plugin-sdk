@@ -70,6 +70,9 @@ registered via `inflow-fusion`, a different repo, and are out of scope here.
    - `job.CmdGetCurrentScope()` / `job.CmdGetScope("$.path")` — read context; both
      return `any`, type-assert to `[]byte`.
    - `job.CmdSetOnPath("$.path", map[string]any{...})` — write into flow context.
+   - `job.CmdSvcCall(data, opData)` — call an extrinsics service through the
+     runtime (feeder pattern). The call is origin-tagged `plugin:<node title>`;
+     the service may refuse it if plugin calls aren't granted.
    - `job.CmdStopFlow()` — abort the whole flow.
 4. **Add forms** when the node needs configuration:
    `sdkv1.FormBuilder{Jsonschema: <JSON Schema>, Jsonui: <UI Schema>}` (JSON Forms).

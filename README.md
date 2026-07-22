@@ -234,6 +234,8 @@ func(job sdkv1.Job) {
 | `job.CmdGetCurrentScope()` | Fetch the current context scope (raw bytes). |
 | `job.CmdGetScope(path)`    | Fetch a slice of context by JSON path (e.g. `$.OPA`). |
 | `job.CmdSetOnPath(path, m)`| Commit data into the flow context at a JSON path. |
+| `job.CmdNextFilter(tags)`  | Route outbound ports at runtime — follow only the ports carrying the named tags. |
+| `job.CmdSvcCall(data, op)` | Call an extrinsics service through the runtime. Origin-tagged `plugin:<node title>`; the service may refuse ungranted plugin calls. |
 | `job.CmdStopFlow()`        | Stop the entire workflow run. |
 
 Full details, semantics, and the underlying subjects are in
@@ -248,7 +250,7 @@ Full details, semantics, and the underlying subjects are in
 | [cookbook.md](cookbook.md) | **Start here to build one** — a task-organized cookbook: scaffold, actions, input, progress, context, forms, recipes, ship checklist. |
 | [docs/architecture.md](docs/architecture.md) | Where the plugin node sits in Inflowenger (Context / Workflows / Fractals / Adapters), and the plugin lifecycle. |
 | [docs/protocol-inflowv1.md](docs/protocol-inflowv1.md) | The `inflowv1` wire protocol: every NATS subject, request/response shape, and the request↔job handshake. |
-| [docs/jobs-and-commands.md](docs/jobs-and-commands.md) | The `Job` API in depth — progress, done, context read/write, stop. |
+| [docs/jobs-and-commands.md](docs/jobs-and-commands.md) | The `Job` API in depth — progress, done, context read/write, routing, extrinsics svc calls, stop. |
 | [docs/form-builder.md](docs/form-builder.md) | Building action & settings UIs with JSON Forms + `x-inflow-ui`. |
 | [docs/examples.md](docs/examples.md) | Annotated walkthrough of the `HTTP.CALL` and `RPC` sample plugins. |
 | [docs/inflow-ecosystem.md](docs/inflow-ecosystem.md) | Working notes on the broader Inflowenger platform (seed for the full ecosystem doc). |

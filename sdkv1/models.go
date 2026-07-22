@@ -109,3 +109,7 @@ type RequestBody[T any] struct {
 	Registry map[string]any `json:"_registry"`
 	Body     T              `json:"body"`
 }
+type ExtSvcRequestBody struct {
+	Data          any            `json:"data"`
+	OperationData map[string]any `json:"op"`
+}

@@ -13,12 +13,12 @@ type Job struct {
 	plugin IPlugin
 	Action string
 	JobId  string
-	Req Request
+	Req    Request
 }
 
-func (j *Job) Done(data map[string]any,key ...string) any {
+func (j *Job) Done(data map[string]any, key ...string) any {
 
-	return j.Command(ProgressCommand, CommandPayload{Progress: 100, Details: data,CommitOn: strings.Join(key,".")})
+	return j.Command(ProgressCommand, CommandPayload{Progress: 100, Details: data, CommitOn: strings.Join(key, ".")})
 
 }
 func (j *Job) DoneWithError(error string) any {
@@ -41,13 +41,22 @@ func (j *Job) CmdGetCurrentScope() any {
 }
 func (j *Job) CmdNextFilter(nextsTags []string) any {
 	sub := j.makeJobSubject(JobCommandNextTags)
-	msg, err := j.send(sub, []byte(strings.Join(nextsTags,",")))
+	msg, err := j.send(sub, []byte(strings.Join(nextsTags, ",")))
 	if err != nil {
 		return err
 	}
 	return msg.Data
 }
-
+func (j *Job) CmdSvcCall(data any, opData map[string]any) any {
+	envelop := ExtSvcRequestBody{Data: data, OperationData: opData}
+	reqBody, _ := sonic.Marshal(envelop)
+	sub := j.makeJobSubject(JobCommandRequest)
+	msg, err := j.send(sub, []byte(reqBody))
+	if err != nil {
+		return err
+	}
+	return msg.Data
+}
 func (j *Job) CmdGetScope(jsonPath string) any {
 	sub := j.makeJobSubject(ContextPathCommand)
 	msg, err := j.send(sub, []byte(jsonPath))
@@ -65,9 +74,9 @@ func (j *Job) CmdStopFlow() any {
 	return msg.Data
 }
 func (j *Job) CmdSetOnPath(jsonPath string, data map[string]any) any {
-	dataContent:=JobBodyContent{
+	dataContent := JobBodyContent{
 		CommitOn: jsonPath,
-		Details: data,
+		Details:  data,
 	}
 	sub := j.makeJobSubject(JobCommandCommit)
 	bData, err := sonic.Marshal(dataContent)

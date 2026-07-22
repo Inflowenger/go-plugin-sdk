@@ -3,8 +3,8 @@
 Everything a plugin *does* happens inside a `Job`. When the runtime executes one
 of your actions, the SDK acknowledges the request with a fresh `jobId` and hands
 your `RequestHandler` a `Job` bound to that id and to the NATS connection. Through
-it you report progress, read and write the flow's context, finish the job, or stop
-the flow.
+it you report progress, read and write the flow's context, call an extrinsics
+service, finish the job, or stop the flow.
 
 ```go
 type Job struct {
@@ -155,6 +155,45 @@ with a tool call the handler routes the flow out of the matching port —
 `job.CmdNextFilter([]string{calledFunctionName})`. Call it before `Done`; skip it
 entirely to let the flow follow its default route.
 
+## Calling an extrinsics service
+
+`CmdSvcCall` invokes an **extrinsics service** through the runtime — the same
+backend call an extrinsics node makes, but issued mid-job from your handler:
+
+```go
+resp := job.CmdSvcCall(
+    map[string]any{"rows": batch},       // data — the payload for the service
+    map[string]any{"table": "events"},   // op   — operation metadata
+)
+if b, ok := resp.([]byte); ok {
+    fmt.Println("svc replied:", string(b))
+}
+```
+
+The SDK sends the two arguments as a `{data, op}` envelope. The runtime rebuilds
+it, attaches the current node, and forwards the request to the extrinsics
+service over the infra bus — exactly the envelope an extrinsics node sends. Two
+things distinguish a plugin-originated call:
+
+- **Origin tagging.** The runtime stamps the egress request with an
+  `origin: plugin:<node title>` header. The receiving service can always tell
+  the call came from *inside a plugin*, not from an extrinsics node the flow
+  author placed on the canvas.
+- **Grant enforcement.** Because this is effectively running an extrinsics node
+  from within a plugin, a backend may not permit it. That policy lives on the
+  service side: its svc handler inspects the `origin` header and refuses calls
+  it hasn't granted — the refusal comes back as the service's reply. A transport
+  failure (no service, timeout) nacks the command and ends the job with a
+  bad-request conclusion, failing the node.
+
+The canonical use is a **feeder plugin**: a plugin that ingests from an external
+system and pushes into the main system — feeding a store or similar sink through
+the extrinsics service — instead of only committing results into the flow
+context.
+
+On success the return value is the service's raw reply bytes (type-assert to
+`[]byte`, as with the context reads); on failure it is an `error`.
+
 ## Command reference
 
 | Method | Command subject suffix | Payload → | Returns |
@@ -166,6 +205,7 @@ entirely to let the flow follow its default route.
 | `CmdGetScope(jsonPath)`     | `context/path`    | `jsonPath` | context bytes |
 | `CmdSetOnPath(jsonPath, m)` | `commit`          | `{commit_on, details}` | ack |
 | `CmdNextFilter(tags)`       | `next_tags`       | comma-joined tags | ack |
+| `CmdSvcCall(data, op)`      | `request/svc`     | `{data, op}` | service reply bytes |
 | `CmdStopFlow()`             | `stop`            | — | ack |
 
 ## A complete handler

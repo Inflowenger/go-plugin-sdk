@@ -48,6 +48,8 @@ The `<CMD>` values on the last subject are the job commands:
 | `context/current` | `job.CmdGetCurrentScope` | Read the current context scope. |
 | `context/path` | `job.CmdGetScope` | Read context by JSON path. |
 | `commit` | `job.CmdSetOnPath` | Write data into context at a JSON path. |
+| `next_tags` | `job.CmdNextFilter` | Route outbound ports: keep only the named tags. |
+| `request/svc` | `job.CmdSvcCall` | Call an extrinsics service through the runtime. The runtime forwards the `{data, op}` envelope with an `origin: plugin:<node title>` header so the service can refuse ungranted plugin-originated calls. |
 | `stop` | `job.CmdStopFlow` | Stop the whole flow. |
 
 ## The request → job handshake

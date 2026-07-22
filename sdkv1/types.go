@@ -9,4 +9,5 @@ const (
 	ContextPathCommand    Command = "context/path"
 	JobCommandCommit      Command = "commit"
 	JobCommandNextTags    Command = "next_tags"
+	JobCommandRequest     Command = "request/svc"
 )
