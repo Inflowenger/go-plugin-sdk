@@ -1,6 +1,7 @@
 package sdkv1
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -47,10 +48,13 @@ func (j *Job) CmdNextFilter(nextsTags []string) any {
 	}
 	return msg.Data
 }
-func (j *Job) CmdSvcCall(data any, opData map[string]any) any {
-	envelop := ExtSvcRequestBody{Data: data, OperationData: opData}
+func (j *Job) CmdSvcCall(action string ,data any, opData map[string]any) any {
+	if strings.TrimSpace(action)==""{
+		return errors.New("invalid subject")
+	}
+	envelop := CallSvcBody{ Data: data, OperationData: opData}
 	reqBody, _ := sonic.Marshal(envelop)
-	sub := j.makeJobSubject(JobCommandRequest)
+	sub := j.makeCallSvcSubject(Command(action))
 	msg, err := j.send(sub, []byte(reqBody))
 	if err != nil {
 		return err
@@ -111,4 +115,9 @@ func (j *Job) send(sub string, data []byte) (*nats.Msg, error) {
 // makeJobSubject creates a subject for job updates (CPU pattern)
 func (j *Job) makeJobSubject(cmd Command) string {
 	return fmt.Sprintf("inflow.cpu.%s.%s.%s", j.plugin.GetPluginId(), j.JobId, cmd)
+}
+
+// makeJobSubject creates a subject for job updates (CPU pattern)
+func (j *Job) makeCallSvcSubject(action Command) string {
+	return fmt.Sprintf("inflow.cpu.%s.%s.%s.%s", j.plugin.GetPluginId(), j.JobId, JobCommandRequest,action)
 }

@@ -49,7 +49,7 @@ The `<CMD>` values on the last subject are the job commands:
 | `context/path` | `job.CmdGetScope` | Read context by JSON path. |
 | `commit` | `job.CmdSetOnPath` | Write data into context at a JSON path. |
 | `next_tags` | `job.CmdNextFilter` | Route outbound ports: keep only the named tags. |
-| `request/svc` | `job.CmdSvcCall` | Call an extrinsics service through the runtime. The runtime forwards the `{data, op}` envelope with an `origin: plugin:<node title>` header so the service can refuse ungranted plugin-originated calls. |
+| `request/svc.<ACTION>` | `job.CmdSvcCall` | Call a backend service through the runtime. The action rides in the subject (`request/svc.log`, `request/svc.add.db.record`, …) and is not a registered extrinsics subject — the runtime cuts the prefix and re-issues the request to the bare action on the plugin space. Payload is a `{data, op}` envelope, forwarded with an `origin: plugin:<node title>` header so the backend can refuse ungranted plugin-originated calls. |
 | `stop` | `job.CmdStopFlow` | Stop the whole flow. |
 
 ## The request → job handshake

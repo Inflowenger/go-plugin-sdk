@@ -162,18 +162,27 @@ backend call an extrinsics node makes, but issued mid-job from your handler:
 
 ```go
 resp := job.CmdSvcCall(
-    map[string]any{"rows": batch},       // data — the payload for the service
-    map[string]any{"table": "events"},   // op   — operation metadata
+    "add.db.record",                     // action — what you ask the service to do
+    map[string]any{"rows": batch},       // data   — the payload for the service
+    map[string]any{"table": "events"},   // op     — operation metadata
 )
 if b, ok := resp.([]byte); ok {
     fmt.Println("svc replied:", string(b))
 }
 ```
 
-The SDK sends the two arguments as a `{data, op}` envelope. The runtime rebuilds
-it, attaches the current node, and forwards the request to the extrinsics
-service over the infra bus — exactly the envelope an extrinsics node sends. Two
-things distinguish a plugin-originated call:
+The action is required — an empty one returns an `error` without sending
+anything. On the wire the action becomes a suffix of the command subject —
+`inflow.cpu.<PLUGIN_ID>.<JOB_ID>.request/svc.<ACTION>` (e.g. `request/svc.log`,
+`request/svc.add.db.record`) — and the body is a `CallSvcBody` envelope
+(`{data, op}`).
+
+The action is deliberately **not** a registered extrinsics subject. It names
+*what you want done*; the runtime cuts the `request/svc.` prefix and re-issues
+the call as a plain request addressed to the bare action (`add.db.record`) on
+the plugin space, attaching the current node to the body. The backend decides
+which actions it serves and what each maps to, so a plugin can never address an
+arbitrary registered service subject directly — which keeps this surface safe. Two more things distinguish a plugin-originated call:
 
 - **Origin tagging.** The runtime stamps the egress request with an
   `origin: plugin:<node title>` header. The receiving service can always tell
@@ -194,6 +203,10 @@ context.
 On success the return value is the service's raw reply bytes (type-assert to
 `[]byte`, as with the context reads); on failure it is an `error`.
 
+The receiving side — subscribing to action subjects on the plugin space and the
+grant policy — is implemented with **inflow-fusion**; see that repo's
+`docs/plugin-svc-calls.md`.
+
 ## Command reference
 
 | Method | Command subject suffix | Payload → | Returns |
@@ -205,7 +218,7 @@ On success the return value is the service's raw reply bytes (type-assert to
 | `CmdGetScope(jsonPath)`     | `context/path`    | `jsonPath` | context bytes |
 | `CmdSetOnPath(jsonPath, m)` | `commit`          | `{commit_on, details}` | ack |
 | `CmdNextFilter(tags)`       | `next_tags`       | comma-joined tags | ack |
-| `CmdSvcCall(data, op)`      | `request/svc`     | `{data, op}` | service reply bytes |
+| `CmdSvcCall(action, data, op)` | `request/svc.<action>` | `{data, op}` | service reply bytes |
 | `CmdStopFlow()`             | `stop`            | — | ack |
 
 ## A complete handler

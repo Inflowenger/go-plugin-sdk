@@ -235,7 +235,7 @@ func(job sdkv1.Job) {
 | `job.CmdGetScope(path)`    | Fetch a slice of context by JSON path (e.g. `$.OPA`). |
 | `job.CmdSetOnPath(path, m)`| Commit data into the flow context at a JSON path. |
 | `job.CmdNextFilter(tags)`  | Route outbound ports at runtime — follow only the ports carrying the named tags. |
-| `job.CmdSvcCall(data, op)` | Call an extrinsics service through the runtime. Origin-tagged `plugin:<node title>`; the service may refuse ungranted plugin calls. |
+| `job.CmdSvcCall(action, data, op)` | Ask the extrinsics service to run `action` (e.g. `add.db.record`). Origin-tagged `plugin:<node title>`; the service may refuse ungranted plugin calls. |
 | `job.CmdStopFlow()`        | Stop the entire workflow run. |
 
 Full details, semantics, and the underlying subjects are in
