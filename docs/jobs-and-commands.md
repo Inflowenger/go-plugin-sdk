@@ -85,12 +85,23 @@ job.Done(payload, "result", "http")
 
 // Failure — completes with an error payload.
 job.DoneWithError("upstream returned 500")
+
+// Failure that still has something to report/keep — same conclusion, extra details.
+job.DoneWithErrorData("upstream returned 500", map[string]any{"messages": conversation})
 ```
 
-Under the hood both are a `progress` command at `100`: `Done` sends
+Under the hood all three are a `progress` command at `100`: `Done` sends
 `{progress:100, details:data, commit_on:key}`, `DoneWithError` sends
-`{progress:100, details:{"error":msg}}`. A handler should call exactly one of them
-before returning.
+`{progress:100, details:{"error":msg}}`, and `DoneWithErrorData` sends the same
+with `data` merged in beside the reason (`error` always wins) and the optional
+`commit_on` key. A handler should call exactly one of them before returning.
+
+Reach for `DoneWithErrorData` when the failure is not the whole story. The details
+of a terminal command are what gets committed onto the node's scope, so a bare
+`DoneWithError` — reporting only `error` — drops whatever the node had persisted
+there. Passing that state back through `data` keeps it readable on the next run,
+and gives the canvas (and any downstream branch the node routed to before
+concluding) the context to act on rather than just a message.
 
 ## Reading the flow context
 
@@ -214,6 +225,7 @@ grant policy — is implemented with **inflow-fusion**; see that repo's
 | `Progress(pct, Frame)`      | `progress`        | `{progress, frame}` | ack |
 | `Done(data, key...)`        | `progress`        | `{progress:100, details, commit_on}` | ack |
 | `DoneWithError(msg)`        | `progress`        | `{progress:100, details:{error}}` | ack |
+| `DoneWithErrorData(msg, data, key...)` | `progress` | `{progress:100, details:{...data, error}, commit_on}` | ack |
 | `CmdGetCurrentScope()`      | `context/current` | — | context bytes |
 | `CmdGetScope(jsonPath)`     | `context/path`    | `jsonPath` | context bytes |
 | `CmdSetOnPath(jsonPath, m)` | `commit`          | `{commit_on, details}` | ack |

@@ -22,9 +22,34 @@ func (j *Job) Done(data map[string]any, key ...string) any {
 	return j.Command(ProgressCommand, CommandPayload{Progress: 100, Details: data, CommitOn: strings.Join(key, ".")})
 
 }
+
+// DoneWithError ends the job as failed, reporting the reason as its only detail.
 func (j *Job) DoneWithError(error string) any {
 
-	return j.Command(ProgressCommand, CommandPayload{Progress: 100, Details: map[string]any{"error": error}})
+	return j.DoneWithErrorData(error, nil)
+
+}
+
+// DoneWithErrorData ends the job as failed exactly like DoneWithError, but keeps
+// a payload: `data` is reported (and committed, at `key` when given) next to the
+// reason, which always lands on the canonical "error" detail — so a key named
+// "error" inside `data` is overwritten.
+//
+// Use it when the failure still carries something the flow needs: the state the
+// node reached, a partial result, or scope the node must not drop. That last one
+// matters because a terminal command's details ARE what gets committed onto the
+// node's scope — a bare DoneWithError reports only "error", so anything the node
+// had persisted there (a conversation, a cursor) is gone by the next read. Hand
+// it back through `data` to keep it.
+func (j *Job) DoneWithErrorData(error string, data map[string]any, key ...string) any {
+
+	details := make(map[string]any, len(data)+1)
+	for k, v := range data {
+		details[k] = v
+	}
+	details["error"] = error
+
+	return j.Command(ProgressCommand, CommandPayload{Progress: 100, Details: details, CommitOn: strings.Join(key, ".")})
 
 }
 

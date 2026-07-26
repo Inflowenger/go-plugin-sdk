@@ -62,6 +62,8 @@ func (p *Plugin) Send(subject string, data []byte) (*nats.Msg, error) {
 			if err == nats.ErrNoResponders {
 				if retry > 2 {
 					log.Default().Printf("No responders - retry :%d", retry)
+					log.Default().Printf("No responders - body : %s", string(data))
+
 				}
 				time.Sleep(time.Duration(retry+1) * time.Second)
 				continue
