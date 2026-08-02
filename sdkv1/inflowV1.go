@@ -12,19 +12,48 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+// introPayload is the body of an @intro reply.
+//
+// Split out of the handler so the reply can be tested without a connection,
+// because a marshal failure here is invisible on the wire: the handler has
+// nothing to send, so it stays silent and the caller sees a plain timeout —
+// indistinguishable from a plugin that is not running. That is exactly how this
+// regressed. It marshalled `p.Intro`, the setter *method*: a func value, which
+// no encoder accepts, so no plugin ever answered @intro. Marshal the `intro`
+// FIELD.
+func (p *Plugin) introPayload() ([]byte, error) {
+	return sonic.Marshal(p.intro)
+}
+
+// settingsPayload is the body of a @settings reply. A plugin that requires
+// nothing still answers, with an empty object: an empty body is not JSON, so a
+// caller could not tell "asks for nothing" from "not running".
+func (p *Plugin) settingsPayload() ([]byte, error) {
+	if p.settings == nil {
+		return []byte("{}"), nil
+	}
+	return sonic.Marshal(p.settings)
+}
+
 func (p *Plugin) introHandler() error {
 	conn := p.infraConn.GetConnection()
 	if conn == nil {
 		return fmt.Errorf("connection error occurred")
 	}
-	conn.Subscribe(p.makeIntroSubject(), func(msg *nats.Msg) {
-		// Handle the intro message
-		introByte, err := sonic.Marshal(p.Intro)
+	_,err:=conn.Subscribe(p.makeIntroSubject(), func(msg *nats.Msg) {
+		introByte, err := p.introPayload()
 		if err != nil {
+			log.Printf("intro: marshal failed: %v", err)
 			return
 		}
 		msg.Respond(introByte)
 	})
+	if err!= nil {
+		log.Printf("subscribe error: %s on %s\n", err.Error(), p.makeIntroSubject())
+		return fmt.Errorf("failed to subscribe to intro subject")
+	}else{
+		log.Printf("Intro Subscribed on : %s", p.makeIntroSubject())
+	}
 	if p.intro.Settings != nil {
 		if strings.TrimSpace(p.intro.Settings.SubmitTo) == "" {
 			log.Println("no setting service defined")
@@ -41,19 +70,21 @@ func (p *Plugin) settingsHandler() error {
 		return fmt.Errorf("connection error occurred")
 
 	}
-	conn.Subscribe(p.makeSettingsSubject(), func(msg *nats.Msg) {
+	_,err:=conn.Subscribe(p.makeSettingsSubject(), func(msg *nats.Msg) {
 		fmt.Println("Settings Called")
-		// Handle the settings message
-		if p.settings == nil {
-			msg.Respond(nil)
-			return
-		}
-		settingsByte, err := sonic.Marshal(p.settings)
+		settingsByte, err := p.settingsPayload()
 		if err != nil {
+			log.Printf("settings: marshal failed: %v", err)
 			return
 		}
 		msg.Respond(settingsByte)
 	})
+	if err != nil {
+		log.Printf("subscribe error: %s on %s\n", err.Error(), p.makeSettingsSubject())
+		return fmt.Errorf("failed to subscribe to settings subject")
+	}else{
+		log.Printf("Settings Subscribed on : %s", p.makeSettingsSubject())
+	}
 	// settings submit handler
 	if p.settings != nil {
 		if strings.TrimSpace(p.settings.SubmitTo) == "" {

@@ -53,7 +53,10 @@ type FormBuilder struct {
 }
 type Settings struct {
 	FormBuilder
-	SubmitHandler func(Request) Response
+	// Excluded from JSON like every other handler on this file: @settings
+	// marshals this struct to serve the form, and a func field makes that
+	// marshal fail — which silently drops the response.
+	SubmitHandler func(Request) Response `json:"-"`
 }
 
 // CommandPayload is the body shipped with every in-job progress command
