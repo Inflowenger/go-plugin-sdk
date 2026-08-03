@@ -126,18 +126,24 @@ and their guarantees — useful for idempotency/resume patterns.)_
 
 - Forms are **JSON Schema + UI Schema**, rendered by **JSON Forms**
   (jsonforms.io).
-- Inflowenger ships `@inflowenger/inflow-ui` (Vue 3 + TS) extending JSON Forms with
-  `x-inflow-ui` custom renderers: control, enum, layout, one-of, action button,
-  plus a theme config and action registry. Lives at
-  `inflow-vue/inflow-inspector/packages/inflow-ui`.
+- Inflowenger ships `@inflowenger/plugin-form-builder` (Vue 3 + TS) extending JSON
+  Forms with the `x-inflow-ui` key: control and layout renderers that attach an
+  action button, plus a theme config and an action registry. Lives at
+  `packages/plugin-form-builder` in the `Inflowenger/inflow-js` repo. Enum and
+  `oneOf` controls are deliberately left to the host's renderer set.
+- The host registers the actions a form may call by name. The production host
+  registers exactly one, `pluginFn`, which calls a plugin **meta function** and
+  patches its answer into the form — the mechanism behind dependent fields.
 - _(note: the SDK author referred to "formjson.io"; the actual library in use is
   **JSON Forms / jsonforms.io**.)_
 
 ## Open questions / to verify before official docs
 
 - Exact primitive node set and the compile-to-primitives pipeline.
-- Public registration API for **meta functions** (type + wiring exist in the SDK;
-  no exported setter yet).
+- Runtime **schema** mutation from a form action: `x-inflow-ui` answers are
+  patched into form *data* only, so a `<select>` cannot have its `enum` populated
+  live. Needs either `updateSchema` implemented in the renderer or an
+  `x-inflow-ui.options` source read from form data.
 - Intro serialization: `introHandler` marshals the `Intro` *method value* rather
   than the stored `intro` field — confirm intended behavior / whether this is a
   bug to fix. _(code observation, not user-facing)_

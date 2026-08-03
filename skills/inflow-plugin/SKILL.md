@@ -80,15 +80,46 @@ registered via `inflow-fusion`, a different repo, and are out of scope here.
    `sdkv1.FormBuilder{Jsonschema: <JSON Schema>, Jsonui: <UI Schema>}` (JSON Forms).
    For plugin-level onboarding/config use `p.RequiredParams(&sdkv1.Settings{...})`
    with a `SubmitHandler`.
-5. **Build & run**: `go build ./...`, then `go run .`; the SDK logs each subscribed
+5. **Make dependent fields work.** Any field a user cannot type from memory (an
+   `accountId`, a project key, an id valid only inside another selection) must not
+   ship as a bare text input. Register a **meta function** and put a button on the
+   control that calls it:
+   ```go
+   p.AddMeta(sdkv1.Meta{                    // before Start()
+       Method:         "my.meta.users.resolve",
+       RequestHandler: func(r sdkv1.Request) any { /* … */ },
+   })
+   ```
+   ```jsonc
+   // in Jsonui, on the control
+   "x-inflow-ui": {
+     "action": { "name": "pluginFn", "fn": "my.meta.users.resolve" },
+     "button": { "position": "append", "label": "Find user" }
+   }
+   ```
+   Four rules, each of which fails **silently** if broken:
+   - `action.name` is always the literal `pluginFn`. It is the host's only action.
+   - The request arrives **flat** (form fields + `settings` + `value` at the top
+     level), *not* in the `{_registry, body}` action envelope — so
+     `CastRequestTo` yields a zero struct here. Decode tolerantly, trying `body`
+     first and then the raw bytes.
+   - Return the **patch object** (`map[string]any{"assignee": "5b10…"}`), not
+     `sdkv1.Response` — the latter's `{data,error}` envelope gets patched in as
+     fields called `data` and `error`. Patch keys are absolute leaf paths.
+   - There is no error channel: write failures into a readonly status field in
+     the patch, or the button appears to do nothing.
+   Full contract: `docs/form-builder.md` and the catalog's `dependent-fields.md`.
+6. **Build & run**: `go build ./...`, then `go run .`; the SDK logs each subscribed
    subject on startup. Verify by adding the node to a flow and running it.
 
 ## Known limitations to respect
 
-- **Meta functions** (live per-field form validation via `SubmitTo`) are defined in
-  the protocol but have **no exported registration method yet**. Use the settings
-  `SubmitHandler`, which is wired. Do not write code calling a non-existent
-  `AddMeta`/meta registration API.
+- A form action **cannot mutate the schema** — answers are patched into form
+  *data* only, so you cannot populate a `<select>`'s `enum` at runtime. Model a
+  picker as free text + a resolve button (scalar fields) or as an array field
+  filled with a returned list (multi-value). Do not invent an options-loading API.
+- Nothing fires automatically: no on-change, no debounce, no type-ahead. The user
+  clicks. Label the button with what it does.
 - If asked for anything about **extrinsic** nodes, redirect to `inflow-fusion`; it
   is not part of this SDK.
 
@@ -98,4 +129,6 @@ registered via `inflow-fusion`, a different repo, and are out of scope here.
 - `main` blocks after `Start()`.
 - Each action: unique `Method`, a `RequestHandler`, exactly one finish per path.
 - Each `Jsonschema` matches its input struct.
+- Every meta function is registered before `Start()`, decodes a flat body, and
+  returns a patch (not `sdkv1.Response`) if a form button calls it.
 - No fabricated SDK methods — every `Job`/`Plugin` call exists in `sdkv1/`.

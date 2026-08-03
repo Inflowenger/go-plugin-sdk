@@ -27,10 +27,12 @@ type FormBuilder struct {
 
 Forms are rendered by [**JSON Forms**](https://jsonforms.io) — the schema + UI
 schema pattern. Inflowenger ships a Vue 3 renderer set,
-[`@inflowenger/inflow-ui`](../../inflow-vue/inflow-inspector/packages/inflow-ui),
-that extends JSON Forms with custom `x-inflow-ui` renderers (custom controls,
-enums, layouts, one-of, and action buttons) tailored to the canvas. Because it is
-plain JSON Schema + UI Schema, any JSON Forms tooling can author or preview a form.
+[`@inflowenger/plugin-form-builder`](https://github.com/Inflowenger/inflow-js/tree/master/packages/plugin-form-builder),
+that extends JSON Forms with the `x-inflow-ui` key: a control or layout may carry
+a **button** that runs a named **action**, which is how a form calls back into the
+plugin while it is open. Controls without `x-inflow-ui` fall through to the
+standard renderers untouched, and because it is plain JSON Schema + UI Schema, any
+JSON Forms tooling can author or preview a form.
 
 A minimal action form:
 
@@ -93,26 +95,43 @@ The form is served on `inflow.v1.<PLUGIN_ID>.@settings`; submissions are handled
 directly to the intro, usable as an onboarding stage shown when the plugin is first
 added.
 
-## Live validation with meta functions
+## Meta functions
 
-Set `SubmitTo` on an action's `FormBuilder` to the name of a **meta function** — a
-lightweight request/reply handler (not a job) the front end can call as the user
-types, e.g. to check that a URL is reachable or a name is unique. Meta functions
-answer on `inflow.v1.<PLUGIN_ID>.<method>` and return a `Response`:
+A **meta function** is a lightweight request/reply handler (not a job) that the
+front end can call while a form is open — to check that a URL is reachable, to
+turn a typed name into the id an API needs, or to fill dependent fields. Register
+them with `AddMeta` before `Start()`; each is served on
+`inflow.v1.<PLUGIN_ID>.<Method>`:
 
 ```go
 type Meta struct {
     Method         string
-    RequestHandler func(sdkv1.Request) sdkv1.Response
+    RequestHandler func(sdkv1.Request) any
 }
+
+p.AddMeta(sdkv1.Meta{
+    Method:         "my.meta.ping",
+    RequestHandler: func(r sdkv1.Request) any { return sdkv1.Response{Data: …} },
+})
 ```
 
-Unlike an action, a meta function is synchronous request/reply with no job,
-progress, or context access — it exists to give the form immediate feedback.
+The handler returns `any` and the SDK marshals it **verbatim** — a struct, a map,
+or a bare array. It is not forced into the `{data, error}` envelope, and what it
+should return depends on who is calling:
 
-> **Status.** The `Meta` type and its subscription wiring
-> ([`metaFunchandler`](../sdkv1/inflowV1.go)) are in place, and `Start()` serves
-> any registered meta functions. A public method for registering them on the
-> plugin is not exported yet, so treat meta functions as a defined-but-emerging
-> part of the API. The settings **submit** path (`Settings.SubmitHandler`) is the
-> fully wired equivalent today.
+| Caller | Return |
+|---|---|
+| `FormBuilder.SubmitTo` — live validation of a form on submit | `sdkv1.Response` |
+| An `x-inflow-ui` button on a control — filling fields in | the **patch object**, e.g. `map[string]any{"projectKey": "OPS"}` |
+
+Unlike an action, a meta function is synchronous request/reply with no job,
+progress, or context access.
+
+> **Request shape.** A meta call made from a form arrives **flat** — the form's
+> fields, plus `settings` and `value`, at the top level — *not* wrapped in the
+> action's `{"_registry":…, "body":{…}}` envelope. `CastRequestTo` therefore
+> returns a zero-valued struct here, with no error. Decode tolerantly.
+
+Full contract, including the answer-shape rules and current limits:
+[dependent-fields.md](https://github.com/Inflowenger/plugin-catalog/blob/main/docs/dependent-fields.md)
+in the plugin catalog.

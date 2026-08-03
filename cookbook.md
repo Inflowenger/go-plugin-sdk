@@ -331,10 +331,11 @@ p.RequiredParams(&sdkv1.Settings{
 })
 ```
 
-> **Note:** live per-field validation via **meta functions** (`SubmitTo` on an
-> action form) is defined in the protocol, but there is **no exported method to
-> register a meta function yet** — use the settings `SubmitHandler` above, which is
-> fully wired today. See [docs/form-builder.md](docs/form-builder.md).
+> **Note:** the submit handler is a **validator, not a store** — the platform owns
+> the values. For helpers a form calls while it is still being filled in
+> (connection tests, lookups, fields that depend on another field), register
+> **meta functions** with `p.AddMeta(...)` before `Start()`. See
+> [docs/form-builder.md](docs/form-builder.md).
 
 ---
 
