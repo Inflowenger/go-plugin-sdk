@@ -68,6 +68,78 @@ The runtime fetches this form on demand from
 `inflow.v1.<PLUGIN_ID>.http.call.@form`. What the user enters becomes the `body`
 of the execution request.
 
+## Building the two documents in Go: `formkit`
+
+Written by hand, the schema and the UI schema drift: a property is renamed in one
+and not the other, a control keeps pointing at a scope that no longer exists, and
+the field silently stops rendering. The optional [`formkit`](../formkit) package
+removes that class of bug by generating both from one declaration per field, in
+the order the fields are written:
+
+```go
+import "github.com/Inflowenger/go-plugin-sdk/formkit"
+
+form := formkit.New("Get issue").Add(
+    formkit.Text("issueKey", "Issue key").Required().
+        Describe("Issue key or id, e.g. OPS-42").
+        Inline(),                                    // messages about the key appear here
+    formkit.List("fields", "Fields"),
+    formkit.Integer("maxResults", "Max results").Default(50).Between(1, 100),
+    formkit.Text("issueSearch", "Search issues").
+        Lookup("jira.meta.issue.resolve", "Search"). // the ↻ button
+        Into("issueKey").                            // …writes into the key field
+        Picks("jira.issue.get"),                     // …or rebuilds this form as a drop-down
+).Build()                                            // → sdkv1.FormBuilder
+```
+
+Nothing in `sdkv1` depends on it and its output is ordinary JSON Schema + UI
+Schema text, so it is adopt-per-form: build one form with it and hand-write the
+next, or skip the builder entirely and use only the answer helpers below against
+forms you already wrote.
+
+| | |
+|---|---|
+| Fields | `Text` `TextArea` `Secret` `Integer` `Number` `Bool` `Date` `DateTime` `Enum` `Choice` `List` `ListOf` `Custom` |
+| Schema | `.Required()` `.Describe()` `.Default()` `.Format()` `.Min()` `.Max()` `.Between()` `.Set(key, value)` |
+| Layout | `Form.Add` `Form.Group` `.Option(key, value)` `.ShowWhen` `.HideWhen` `.EnableWhen` |
+| Buttons | `.Lookup(fn, label)` `.Into(field)` `.Picks(method)` `.Send(k, v)` `.Button(pos, icon)` |
+| Messages | `.Help()` `.Inline()` `.Says()` |
+| Output | `Form.Build()` `Form.Settings(handler)` `Form.Schema()` `Form.UI()` `Form.SchemaMap()` `Form.Validate()` |
+
+`.Set` and `.Option` take any JSON Schema keyword or renderer hint verbatim, and
+`Custom` takes a whole property fragment — an unusual field never forces the rest
+of the form back to hand-written JSON.
+
+`Build` panics on what would not render (a duplicate or empty property name, a
+fragment that will not marshal). Forms are declared at start-up from literals, so
+that is a programming error, not a runtime condition; `Form.Validate` returns it
+as an `error` for forms assembled from data.
+
+### Answering a form button
+
+The same package carries the two shapes a lookup handler replies with, and both
+work against raw schema strings — including forms written before it existed:
+
+```go
+// One match: patch the field and say what was found.
+return formkit.Success("Issue: %s — %s", key, summary).
+    Patch(map[string]any{"issueKey": key})
+
+// Several: re-render the dialog with that field as a drop-down.
+return formkit.Choose(action.Form, target, options, formkit.FormData(call),
+    formkit.Info("%d issues match — pick one.", len(options)))
+```
+
+`Choose` falls back to listing the candidates as text when the form cannot be
+rebuilt, because the alternative is a button that appears to do nothing.
+`FormData` strips the keys the host adds to the call (`settings`, `value`,
+`targetField`, `form`) before the form is echoed back — `settings` above all,
+which carries credentials and must never be promoted into data saved onto the
+node. `Picker` is `Choose` with the error returned instead of handled;
+`Notification` / `Info` / `Success` / `Warning` / `Failure` / `Help` and the
+`NotifKey` constant are the message vocabulary, shared by form-time hints and
+button answers.
+
 ## Settings (onboarding) forms
 
 `RequiredParams` registers a plugin-level settings form plus a handler for when the
