@@ -166,6 +166,40 @@ with a tool call the handler routes the flow out of the matching port —
 `job.CmdNextFilter([]string{calledFunctionName})`. Call it before `Done`; skip it
 entirely to let the flow follow its default route.
 
+### Declaring outbound ports on the action
+
+`CmdNextFilter` decides *which* tags fire at runtime; `Action.Outbound` is the
+design-time half that declares *what ports exist* so the canvas can draw them
+ahead of time. It is an optional slice of `OutboundPort`:
+
+```go
+p.AddAction(sdkv1.Action{
+    Method: "review",
+    Title:  "Review",
+    Outbound: []sdkv1.OutboundPort{
+        {Title: "Approved", Tags: []string{"approved"}, Description: "passed review"},
+        {Title: "Rejected", Tags: []string{"rejected"}, Description: "needs changes"},
+    },
+    RequestHandler: func(job sdkv1.Job) {
+        // ...decide the outcome, then route out the matching branch:
+        job.CmdNextFilter([]string{"approved"})
+        job.Done(map[string]any{"status": "ok"})
+    },
+})
+```
+
+The whole `Outbound` slice ships with the action on the `@actions` subject, so
+the frontend renders **one output port per entry** — labelled by `Title`,
+explained by `Description` — and stamps every edge drawn from that port with the
+port's `Tags`. Your handler then names the tag(s) to follow via `CmdNextFilter`;
+edges carrying other tags are skipped. Leave `Outbound` nil for the common
+single-output action.
+
+This is a convenience, **not** an essential feature. The same branching already
+works by mixing a plugin with a downstream **contract node** that fans out on the
+committed result — `Outbound` just keeps the port topology, its tags, and its
+documentation on the action itself instead of wiring them by hand on the canvas.
+
 ## Calling an extrinsics service
 
 `CmdSvcCall` invokes an **extrinsics service** through the runtime — the same

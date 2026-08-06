@@ -14,12 +14,34 @@ type PluginIntro struct {
 // PluginAction represents a single plugin action
 // Subject: inflow.v1.<PLUGIN_ID>.@actions
 type Action struct {
-	Method         string      `json:"method"`
-	Description    string      `json:"description"`
-	Title          string      `json:"title"`
-	Icon           Icon        `json:"icon"`
-	RequestHandler JobHandler  `json:"-"`
-	Form           FormBuilder `json:"form"`
+	Method         string         `json:"method"`
+	Description    string         `json:"description"`
+	Title          string         `json:"title"`
+	Icon           Icon           `json:"icon"`
+	RequestHandler JobHandler     `json:"-"`
+	Form           FormBuilder    `json:"form"`
+	Outbound       []OutboundPort `json:"outbound,omitempty"`
+}
+
+// OutboundPort statically declares one of a node's outbound branches. It is the
+// design-time counterpart of runtime tag routing (Job.CmdNextFilter /
+// `next_tags`): the whole Action.Outbound slice is served on the `@actions`
+// subject, so the frontend renders one output port per entry — labelled by
+// Title, explained by Description — and stamps every edge drawn from that port
+// with the port's Tags. At runtime the handler calls
+// `job.CmdNextFilter(port.Tags)` to fire only the branch(es) whose tags it
+// names; edges carrying other tags are skipped.
+//
+// The field is optional and, deliberately, not essential. The same branching is
+// achievable today by mixing a plugin with a downstream **contract node** that
+// fans out on the committed result — declaring Outbound here is only a
+// convenience that keeps the port topology, its tags, and its documentation on
+// the action itself instead of wiring them by hand on the canvas. Leave it nil
+// for the common single-output action.
+type OutboundPort struct {
+	Title       string   `json:"title"`
+	Tags        []string `json:"tags"`
+	Description string   `json:"description,omitempty"`
 }
 
 // Meta is a live, request/response helper method a plugin exposes OUTSIDE the
