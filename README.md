@@ -214,6 +214,7 @@ func(job sdkv1.Job) {
     // Read the flow's shared context.
     current := job.CmdGetCurrentScope()          // whole current scope
     opa     := job.CmdGetScope("$.OPA")          // by JSON path
+    mine    := job.CmdGetScope("$this.id")       // relative to this run's location
 
     // Write into the flow's context at a JSON path.
     job.CmdSetOnPath(`$["result"]`, map[string]any{"count": 42})
@@ -232,8 +233,8 @@ func(job sdkv1.Job) {
 | `job.Done(data, key...)`   | Complete the job (progress 100) and emit `data` as output; optional key path to commit on. |
 | `job.DoneWithError(msg)`   | Complete with an error payload. |
 | `job.CmdGetCurrentScope()` | Fetch the current context scope (raw bytes). |
-| `job.CmdGetScope(path)`    | Fetch a slice of context by JSON path (e.g. `$.OPA`). |
-| `job.CmdSetOnPath(path, m)`| Commit data into the flow context at a JSON path. |
+| `job.CmdGetScope(path)`    | Fetch a slice of context by JSON path (e.g. `$.OPA`), or by `$this…` for the node's own location. |
+| `job.CmdSetOnPath(path, m)`| Commit data into the flow context at a JSON path (`$this…` allowed). |
 | `job.CmdNextFilter(tags)`  | Route outbound ports at runtime — follow only the ports carrying the named tags. |
 | `job.CmdSvcCall(action, data, op)` | Ask the extrinsics service to run `action` (e.g. `add.db.record`). Origin-tagged `plugin:<node title>`; the service may refuse ungranted plugin calls. |
 | `job.CmdStopFlow()`        | Stop the entire workflow run. |

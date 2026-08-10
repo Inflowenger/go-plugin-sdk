@@ -278,6 +278,13 @@ if b, ok := job.CmdGetCurrentScope().([]byte); ok {
 if b, ok := job.CmdGetScope("$.OPA").([]byte); ok {
     fmt.Println("$.OPA:", string(b))
 }
+
+// `$this` is the location this run was handed — the slice the node's `scope`
+// selected. With scope `$.tickets[*]` the node runs once per ticket and each
+// run's `$this` is its own ticket, so the plugin never hardcodes an index.
+if b, ok := job.CmdGetScope("$this.customer.id").([]byte); ok {
+    fmt.Println("customer:", string(b))
+}
 ```
 
 ---
@@ -295,6 +302,10 @@ job.CmdSetOnPath(`$["doc appendix"]`, map[string]any{
 
 This is separate from `job.Done(...)` output: `CmdSetOnPath` writes into shared
 context mid-run; `Done` emits the node's own result.
+
+The path may start at `$this` to write relative to the node's own location —
+`job.CmdSetOnPath("$this.verdict", …)` lands inside whichever slice this run was
+handed, so the same plugin works wherever the designer points its `scope`.
 
 ---
 

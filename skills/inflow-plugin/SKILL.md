@@ -70,6 +70,10 @@ registered via `inflow-fusion`, a different repo, and are out of scope here.
    - `job.CmdGetCurrentScope()` / `job.CmdGetScope("$.path")` — read context; both
      return `any`, type-assert to `[]byte`.
    - `job.CmdSetOnPath("$.path", map[string]any{...})` — write into flow context.
+   - Any path above may start at `$this`, inflow's non-standard root for the
+     location this run was handed (the slice the node's `scope` selected), e.g.
+     `job.CmdGetScope("$this.customer.id")`. Prefer it over a hardcoded index
+     when the node's scope can select more than one location.
    - `job.CmdSvcCall(action, data, opData)` — ask the extrinsics service to run
      `action` (e.g. `add.db.record`) through the runtime (feeder pattern);
      action is required and is not a registered extrinsics subject. The call is

@@ -124,6 +124,36 @@ if b, ok := scope.([]byte); ok {
 Both return `any`: the runtime's reply bytes on success, or an `error` value if the
 command failed — type-assert to `[]byte` to read the data, as the samples do.
 
+## `$this` — the node's own location
+
+Every JSON path a plugin hands the runtime may use **`$this`**, a root of
+inflow's own that is not part of the JSON path spec. It stands for the location
+the node is running on — the slice its `scope` selected — so a plugin can address
+the data it was handed without knowing where in the context tree it sits.
+
+```go
+// Node scope is `$.tickets[*]`, so this run was handed `$.tickets[2]`.
+job.CmdGetScope("$this")             // → the whole ticket
+job.CmdGetScope("$this.customer.id") // → $.tickets[2].customer.id
+job.CmdSetOnPath("$this.verdict", map[string]any{"ok": true})
+job.Done(map[string]any{"ok": true}, "$this", "verdict") // commit_on: $this.verdict
+```
+
+The runtime rewrites `$this` to the run's location before parsing the path, so
+it works anywhere a path is accepted: `CmdGetScope`, `CmdSetOnPath`, the optional
+commit key on `Done` / `DoneWithErrorData`, and inside the `{{ }}` variables of a
+[`CmdSvcCall` `op` payload](#calling-an-extrinsics-service). A path without
+`$this` is untouched, and `$thisOne` is an ordinary field name, not the keyword.
+
+Why it matters: a node whose scope selects **many** locations (`$.tickets[*]`)
+runs once per location. A hardcoded `$.tickets[0]` reads the same ticket every
+time; `$this` follows the run. It is also the only way to write a plugin that
+does not care where the designer pointed its scope.
+
+`$this` is not the same as `CmdGetCurrentScope()`: that returns the node's *own
+output* slot (the location plus the node's `key`), whereas `$this` is the input
+location the node was pointed at.
+
 ## Writing to the flow context (context injection)
 
 Commit data back into the flow's context at a JSON path. This is how a plugin
@@ -136,7 +166,8 @@ job.CmdSetOnPath(`$["doc appendix"]`, map[string]any{
 ```
 
 The path is a JSON path into the context tree; the map is the value written there.
-This is a `commit` command carrying `{commit_on: path, details: data}`.
+This is a `commit` command carrying `{commit_on: path, details: data}`. It may be
+written against `$this` to commit relative to the node's own location.
 
 ## Stopping the flow
 
@@ -216,6 +247,24 @@ if b, ok := resp.([]byte); ok {
 }
 ```
 
+**`op` is resolved by the runtime before the call goes out.** Any root-level
+string value in `op` containing `{{ $.path }}` — or `{{ $this.path }}` — is
+replaced with the live context value, so you can defer a lookup to send time
+instead of fetching it yourself with `CmdGetScope`:
+
+```go
+job.CmdSvcCall("add.db.record", data, map[string]any{
+    "table":   "events",
+    "orderId": "{{$this.id}}",      // this run's order
+    "limit":   "{{$.cfg.limit}}",   // arrives as a number, not a string
+})
+```
+
+A value that is exactly one placeholder keeps the scope value's JSON type; a
+placeholder inside longer text is interpolated as text. Only root-level strings
+are walked — a placeholder nested inside a map or slice in `op` is left alone.
+`data` is **not** resolved; it is sent as you built it.
+
 The action is required — an empty one returns an `error` without sending
 anything. On the wire the action becomes a suffix of the command subject —
 `inflow.cpu.<PLUGIN_ID>.<JOB_ID>.request/svc.<ACTION>` (e.g. `request/svc.log`,
@@ -266,6 +315,9 @@ grant policy — is implemented with **inflow-fusion**; see that repo's
 | `CmdNextFilter(tags)`       | `next_tags`       | comma-joined tags | ack |
 | `CmdSvcCall(action, data, op)` | `request/svc.<action>` | `{data, op}` | service reply bytes |
 | `CmdStopFlow()`             | `stop`            | — | ack |
+
+Every `jsonPath` / `commit_on` above accepts `$this` for the node's own location
+— see [`$this`](#this--the-nodes-own-location).
 
 ## A complete handler
 
