@@ -219,9 +219,6 @@ func(job sdkv1.Job) {
     // Write into the flow's context at a JSON path.
     job.CmdSetOnPath(`$["result"]`, map[string]any{"count": 42})
 
-    // Optionally abort the whole flow.
-    // job.CmdStopFlow()
-
     // Finish. Progress hits 100 and the payload is committed as the node's output.
     job.Done(map[string]any{"ok": true})
 }
@@ -237,7 +234,6 @@ func(job sdkv1.Job) {
 | `job.CmdSetOnPath(path, m)`| Commit data into the flow context at a JSON path (`$this…` allowed). |
 | `job.CmdNextFilter(tags)`  | Route outbound ports at runtime — follow only the ports carrying the named tags. |
 | `job.CmdSvcCall(action, data, op)` | Ask the extrinsics service to run `action` (e.g. `add.db.record`). Origin-tagged `plugin:<node title>`; the service may refuse ungranted plugin calls. |
-| `job.CmdStopFlow()`        | Stop the entire workflow run. |
 
 Full details, semantics, and the underlying subjects are in
 [docs/jobs-and-commands.md](docs/jobs-and-commands.md).

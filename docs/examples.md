@@ -101,7 +101,6 @@ p.AddAction(sdkv1.Action{Method: "fn", RequestHandler: func(job sdkv1.Job) {
     }
     // write into context at a JSON path
     job.CmdSetOnPath(`$["doc appendix"]`, map[string]any{"itemXterm": []uint64{1, 3, 42, 2300}})
-    // job.CmdStopFlow()  // uncomment to abort the whole flow here
 
     job.Done(map[string]any{"action": "done finally...."})
 }})
@@ -142,7 +141,6 @@ p.AddAction(sdkv1.Action{Method: "fn", RequestHandler: func(job sdkv1.Job) {
     if d, ok := job.CmdGetScope("$.OPA").([]byte); ok {
         fmt.Println("Scope :", string(d))
     }
-    // job.CmdStopFlow()
     job.Done(map[string]any{"action": "done"})
 }})
 

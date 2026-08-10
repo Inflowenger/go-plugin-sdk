@@ -24,7 +24,7 @@ invent methods.
 
 Use this when the task involves creating or modifying an inflow **plugin** node:
 scaffolding a plugin, adding/editing an `Action`, decoding request bodies, progress
-reporting, flow-context read/write, stopping a flow, or action/settings forms.
+reporting, flow-context read/write, or action/settings forms.
 
 Do **not** use this for **extrinsic** nodes (internal service calls) — those are
 registered via `inflow-fusion`, a different repo, and are out of scope here.
@@ -79,7 +79,6 @@ registered via `inflow-fusion`, a different repo, and are out of scope here.
      action is required and is not a registered extrinsics subject. The call is
      origin-tagged `plugin:<node title>`; the service may refuse it if plugin
      calls aren't granted.
-   - `job.CmdStopFlow()` — abort the whole flow.
 4. **Add forms** when the node needs configuration:
    `sdkv1.FormBuilder{Jsonschema: <JSON Schema>, Jsonui: <UI Schema>}` (JSON Forms).
    For plugin-level onboarding/config use `p.RequiredParams(&sdkv1.Settings{...})`

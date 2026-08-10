@@ -97,7 +97,6 @@ func TestInit(t *testing.T) {
 			fmt.Println("Scope : ", string(d))
 		}
 		job.CmdSetOnPath(`$["doc appendix"]`, map[string]any{"itemXterm":[]uint64{1,3,42,2300}})
-		// job.CmdStopFlow()
 		job.Done(map[string]any{"action": "done finally...."},)
 	}})
 	p.Start()
@@ -119,7 +118,6 @@ func TestCommands(t *testing.T) {
 		if d, ok := scope.([]byte); ok {
 			fmt.Println("Scope : ", string(d))
 		}
-		// job.CmdStopFlow()
 		job.Done(map[string]any{"action": "done"})
 	}})
 	p.Start()

@@ -94,14 +94,6 @@ func (j *Job) CmdGetScope(jsonPath string) any {
 	}
 	return msg.Data
 }
-func (j *Job) CmdStopFlow() any {
-	sub := j.makeJobSubject(StopCommand)
-	msg, err := j.send(sub, nil)
-	if err != nil {
-		return err
-	}
-	return msg.Data
-}
 func (j *Job) CmdSetOnPath(jsonPath string, data map[string]any) any {
 	dataContent := JobBodyContent{
 		CommitOn: jsonPath,

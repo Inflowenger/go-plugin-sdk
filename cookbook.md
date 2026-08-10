@@ -309,21 +309,7 @@ handed, so the same plugin works wherever the designer points its `scope`.
 
 ---
 
-## Skill 11 — Stop the whole flow
-
-From inside a handler you can abort the entire workflow run — use it for guard
-conditions that should halt everything downstream, not just fail this node:
-
-```go
-if !allowed {
-    job.CmdStopFlow()
-    return
-}
-```
-
----
-
-## Skill 12 — Require settings (onboarding form)
+## Skill 11 — Require settings (onboarding form)
 
 For config the plugin needs before any action runs (credentials, a base URL),
 register a settings form plus a submit handler:

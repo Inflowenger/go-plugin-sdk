@@ -149,6 +149,9 @@ and their guarantees — useful for idempotency/resume patterns.)_
   bug to fix. _(code observation, not user-facing)_
 - Whether `PluginIntro.Settings` (intro-attached form) and `RequiredParams`
   settings are meant to coexist or are two iterations of the same idea.
-- Semantics of `CmdStopFlow` (does it fail the run, or complete it early?).
+- ~~Semantics of `CmdStopFlow`~~ — resolved by removing it from the SDK. Flow
+  control belongs to the graph (a node's outgoing edges) and to the user (the
+  panel's stop); a plugin reports outcomes and does not decide routing. An error
+  is reported and committed, and the flow continues.
 - Scaling model: multiple plugin instances sharing a `PLUGIN_ID` (NATS queue
   groups?) for horizontal scale.

@@ -4,7 +4,7 @@ Everything a plugin *does* happens inside a `Job`. When the runtime executes one
 of your actions, the SDK acknowledges the request with a fresh `jobId` and hands
 your `RequestHandler` a `Job` bound to that id and to the NATS connection. Through
 it you report progress, read and write the flow's context, call an extrinsics
-service, finish the job, or stop the flow.
+service, and finish the job.
 
 ```go
 type Job struct {
@@ -96,6 +96,14 @@ Under the hood all three are a `progress` command at `100`: `Done` sends
 with `data` merged in beside the reason (`error` always wins) and the optional
 `commit_on` key. A handler should call exactly one of them before returning.
 
+**Failing does not stop the flow.** All three conclude the node the same way — the
+error variants are still a completed job, just one whose committed output is an
+error. Any node can fail; the platform treats that as information rather than
+flow control, reporting the reason on the event stream and writing it into the
+context, then continuing to the next node. That is what makes an error something
+a downstream Rule can branch on. If a failure should change where the flow goes,
+express that on the canvas, not by trying to halt it from inside the plugin.
+
 Reach for `DoneWithErrorData` when the failure is not the whole story. The details
 of a terminal command are what gets committed onto the node's scope, so a bare
 `DoneWithError` — reporting only `error` — drops whatever the node had persisted
@@ -168,17 +176,6 @@ job.CmdSetOnPath(`$["doc appendix"]`, map[string]any{
 The path is a JSON path into the context tree; the map is the value written there.
 This is a `commit` command carrying `{commit_on: path, details: data}`. It may be
 written against `$this` to commit relative to the node's own location.
-
-## Stopping the flow
-
-From inside a handler you can halt the entire workflow run:
-
-```go
-job.CmdStopFlow()
-```
-
-Use it for guard conditions — a validation failure or a business rule that should
-abort everything downstream, not just fail this one node.
 
 ## Routing outbound ports at runtime
 
@@ -314,7 +311,6 @@ grant policy — is implemented with **inflow-fusion**; see that repo's
 | `CmdSetOnPath(jsonPath, m)` | `commit`          | `{commit_on, details}` | ack |
 | `CmdNextFilter(tags)`       | `next_tags`       | comma-joined tags | ack |
 | `CmdSvcCall(action, data, op)` | `request/svc.<action>` | `{data, op}` | service reply bytes |
-| `CmdStopFlow()`             | `stop`            | — | ack |
 
 Every `jsonPath` / `commit_on` above accepts `$this` for the node's own location
 — see [`$this`](#this--the-nodes-own-location).
