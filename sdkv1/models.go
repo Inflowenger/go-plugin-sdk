@@ -21,6 +21,16 @@ type Action struct {
 	RequestHandler JobHandler     `json:"-"`
 	Form           FormBuilder    `json:"form"`
 	Outbound       []OutboundPort `json:"outbound,omitempty"`
+	// Tags is an open bag of string labels for grouping and classifying an
+	// action. It lets a single plugin binary host several logical products —
+	// e.g. a Google plugin that bundles Docs, Sheets and Calendar actions — and
+	// tell them apart on the `@actions` list.
+	//
+	// The reserved key "class" names the sub-product an action belongs to, so
+	// the frontend can group ports by it: tags["class"] = "sheet" / "docs" /
+	// "calendar". Any other keys are free-form metadata. Optional; leave nil for
+	// a single-class plugin.
+	Tags map[string]string `json:"tags,omitempty"`
 }
 
 // OutboundPort statically declares one of a node's outbound branches. It is the
