@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"os"
+	"strconv"
 	"time"
 
 	natsHandler "github.com/Inflowenger/go-plugin-sdk/nats"
@@ -21,6 +23,13 @@ type IPlugin interface {
 // code with WithTimeout(), since the deadline must sit above whatever the backend
 // needs to answer or the reply is abandoned mid-flight.
 const DefaultSendTimeout = 5 * time.Second
+
+// ReqTimeoutEnv is an env var, in SECONDS, that overrides the send timeout at
+// deploy time — so an operator can widen it for a slow network (REQ_TIMEOUT=50)
+// or tighten it, without touching code. Read in NewPlugin AFTER the options run,
+// so it wins over the developer's WithTimeout. WithDotEnv (if used) has already
+// loaded the .env file into the environment by then.
+const ReqTimeoutEnv = "REQ_TIMEOUT"
 
 type Plugin struct {
 	PluginId    string
@@ -40,7 +49,27 @@ func NewPlugin(opts ...func(*Plugin) error) (*Plugin, error) {
 			return nil, err
 		}
 	}
+	// Operator override, applied last so REQ_TIMEOUT beats the developer's
+	// WithTimeout. WithDotEnv (if used) has already loaded the .env file.
+	if d, ok := reqTimeoutEnv(); ok {
+		p.sendTimeout = d
+	}
 	return p, nil
+}
+
+// reqTimeoutEnv reads REQ_TIMEOUT (seconds) into a duration, reporting ok=false
+// when unset, blank, non-numeric, or non-positive (leaving the code/default).
+func reqTimeoutEnv() (time.Duration, bool) {
+	raw, ok := os.LookupEnv(ReqTimeoutEnv)
+	if !ok || raw == "" {
+		return 0, false
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds <= 0 {
+		log.Printf("Invalid %s=%s, ignoring", ReqTimeoutEnv, raw)
+		return 0, false
+	}
+	return time.Duration(seconds) * time.Second, true
 }
 func (p *Plugin) Start() error {
 	err := p.introHandler()
@@ -121,7 +150,8 @@ func WithDotEnv(envFile string) func(*Plugin) error {
 // WithTimeout sets the NATS request/reply deadline for Send, in SECONDS. Declare
 // it where the plugin is constructed, e.g.
 // NewPlugin(WithDotEnv(f), WithTimeout(65)). Omit it to keep DefaultSendTimeout
-// (5s). A non-positive value is ignored.
+// (5s). A non-positive value is ignored. The REQ_TIMEOUT env var, when set,
+// overrides this at deploy time.
 func WithTimeout(seconds int) func(*Plugin) error {
 	return func(p *Plugin) error {
 		if seconds > 0 {

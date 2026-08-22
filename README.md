@@ -114,10 +114,17 @@ p, err := sdkv1.NewPlugin(
 )
 ```
 
-`Send`'s NATS request/reply deadline defaults to **5s** (`DefaultSendTimeout`).
+`Send`'s NATS request/reply deadline resolves in this order:
+
+1. **`REQ_TIMEOUT` env var (seconds)** — an operator override at deploy time, for
+   a slow network (`REQ_TIMEOUT=50`) or a strict SLA, without touching code.
+   Wins over everything.
+2. **`WithTimeout(seconds)`** — the plugin author's default in code.
+3. **`DefaultSendTimeout`** — **5s**, when neither is set.
+
 A plugin whose actions proxy slow upstream calls (a multi-message search, a large
-fetch) must raise it in code with `WithTimeout(seconds)`, or a slow reply surfaces
-as a bare `ErrTimeout`:
+fetch) must raise the deadline above whatever the backend needs to answer, or a
+slow reply surfaces as a bare `ErrTimeout`:
 
 ```go
 p, err := sdkv1.NewPlugin(sdkv1.WithDotEnv(".env.inflow"), sdkv1.WithTimeout(65))
