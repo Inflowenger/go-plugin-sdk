@@ -9,6 +9,15 @@ type PluginIntro struct {
 	Author   string       `json:"author"`
 	Version  string       `json:"version"`
 	Settings *FormBuilder `json:"settings,omitempty"` // this field is same with setting as requirement data before any action and its can be use as onboard stage
+	// Manual is an optional Markdown document the host renders on the plugin's
+	// page (the FloMorphic Extensions view) — a README/help panel the developer
+	// writes to explain the plugin. Beyond prose, the host upgrades a fenced
+	// ```inflow-meta block, whose body is a meta method name, into a Run button
+	// that calls inflow.v1.<PLUGIN_ID>.<method> through the host proxy and shows
+	// the raw JSON reply beneath it. Since the doc author is also the meta author,
+	// no extra descriptor is needed — the method name in the fence is enough.
+	// Optional; leave empty for no manual.
+	Manual string `json:"manual,omitempty"`
 }
 
 // PluginAction represents a single plugin action
