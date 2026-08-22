@@ -14,17 +14,26 @@ type IPlugin interface {
 	Send(subject string, data []byte) (*nats.Msg, error)
 	GetPluginId()string
 }
+// DefaultSendTimeout is the NATS request/reply deadline for Send when the plugin
+// author doesn't set one. A conservative 5s: fine for the fast RPCs (account
+// list, settings test, a single email send). A plugin whose actions proxy slower
+// upstream calls — a multi-message search, a large fetch — should raise it in
+// code with WithTimeout(), since the deadline must sit above whatever the backend
+// needs to answer or the reply is abandoned mid-flight.
+const DefaultSendTimeout = 5 * time.Second
+
 type Plugin struct {
-	PluginId  string
-	infraConn *natsHandler.Nats
-	intro     PluginIntro
-	settings  *Settings
-	actions   []Action
-	metaFn    []Meta
+	PluginId    string
+	infraConn   *natsHandler.Nats
+	intro       PluginIntro
+	settings    *Settings
+	actions     []Action
+	metaFn      []Meta
+	sendTimeout time.Duration
 }
 
 func NewPlugin(opts ...func(*Plugin) error) (*Plugin, error) {
-	p := &Plugin{}
+	p := &Plugin{sendTimeout: DefaultSendTimeout}
 	for _, o := range opts {
 		err := o(p)
 		if err != nil {
@@ -56,8 +65,12 @@ func (p *Plugin) Send(subject string, data []byte) (*nats.Msg, error) {
 		fmt.Printf("connection error occurred")
 		return nil, fmt.Errorf("connection error")
 	}
+	timeout := p.sendTimeout
+	if timeout <= 0 {
+		timeout = DefaultSendTimeout
+	}
 	for retry := range 5 {
-		msg, err := conn.Request(subject, data, 3*time.Second)
+		msg, err := conn.Request(subject, data, timeout)
 		if err != nil {
 			if err == nats.ErrNoResponders {
 				if retry > 2 {
@@ -101,6 +114,19 @@ func WithDotEnv(envFile string) func(*Plugin) error {
 			return err
 		}
 		p.infraConn = ic
+		return nil
+	}
+}
+
+// WithTimeout sets the NATS request/reply deadline for Send, in SECONDS. Declare
+// it where the plugin is constructed, e.g.
+// NewPlugin(WithDotEnv(f), WithTimeout(65)). Omit it to keep DefaultSendTimeout
+// (5s). A non-positive value is ignored.
+func WithTimeout(seconds int) func(*Plugin) error {
+	return func(p *Plugin) error {
+		if seconds > 0 {
+			p.sendTimeout = time.Duration(seconds) * time.Second
+		}
 		return nil
 	}
 }

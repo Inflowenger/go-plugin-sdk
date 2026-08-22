@@ -126,9 +126,11 @@ req, err := sdkv1.CastRequestTo[Input](job.Req.Data)
 
 ## Transport details
 
-- **Request/reply with retry.** `Plugin.Send` uses NATS request/reply with a 3s
-  timeout and retries up to 5 times on `ErrNoResponders` (backing off), so a job
-  command issued a moment before the runtime is listening still lands.
+- **Request/reply with retry.** `Plugin.Send` uses NATS request/reply with a
+  configurable timeout (default 5s, `DefaultSendTimeout`; set in code with
+  `WithTimeout(seconds)`) and retries up to 5 times on `ErrNoResponders` (backing
+  off), so a job command issued a moment before the runtime is listening still
+  lands.
 - **Credentials.** The connection authenticates with a decorated NATS `.creds`
   blob (JWT + NKey seed), supplied **base64-encoded** in `INFRA_CRED`. The SDK
   decodes it, reads the account from the JWT, and connects with auto-reconnect.

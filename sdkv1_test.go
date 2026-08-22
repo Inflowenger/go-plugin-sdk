@@ -14,7 +14,7 @@ import (
 )
 
 func TestInit(t *testing.T) {
-	p, err := sdkv1.NewPlugin(sdkv1.WithDotEnv(".env.inflow"))
+	p, err := sdkv1.NewPlugin(sdkv1.WithDotEnv(".env.inflow"), sdkv1.WithTimeout(15))
 	if err != nil {
 		panic(err)
 	}

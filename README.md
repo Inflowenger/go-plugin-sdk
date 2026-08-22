@@ -114,6 +114,15 @@ p, err := sdkv1.NewPlugin(
 )
 ```
 
+`Send`'s NATS request/reply deadline defaults to **5s** (`DefaultSendTimeout`).
+A plugin whose actions proxy slow upstream calls (a multi-message search, a large
+fetch) must raise it in code with `WithTimeout(seconds)`, or a slow reply surfaces
+as a bare `ErrTimeout`:
+
+```go
+p, err := sdkv1.NewPlugin(sdkv1.WithDotEnv(".env.inflow"), sdkv1.WithTimeout(65))
+```
+
 The credential is a standard decorated NATS `.creds` blob, base64-encoded. The SDK
 decodes it, reads the account from the JWT, and connects with automatic
 reconnect/retry.
