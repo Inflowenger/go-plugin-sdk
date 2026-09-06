@@ -187,7 +187,7 @@ func (p *Plugin) actionsHandler() {
 		// request handler make a jobId and respond it with the result
 		_, err = conn.Subscribe(p.makeActionCpu(action.Method), func(msg *nats.Msg) {
 			if action.RequestHandler == nil {
-				fmt.Printf("recv new request message on action %s\n", action.Method)
+				(&ActionRequest{Action: action.Method}).Reject(msg, `{"error":"action not implemented"}`)
 				return
 			}
 			jId := uuid.New().String()

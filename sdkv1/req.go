@@ -46,7 +46,19 @@ func CastRequestTo[T any](msg []byte)(*RequestBody[T],error){
 
 func WithJobHandler(jobHanlder JobHandler)func(ar ActionRequest,msg *nats.Msg){
 	return func(ar ActionRequest,msg *nats.Msg) {
-		job:=ar.Accept(msg)
-		jobHanlder(job)
+		job:=ar.Accept(msg) // ack the jobId synchronously, on the dispatch goroutine
+
+
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					// nats.go does not recover panics in callbacks, and this now runs
+					// in its own goroutine, so an unrecovered panic would crash the
+					// whole plugin process. Fail just this job instead.
+					job.DoneWithError(fmt.Sprintf("plugin handler panicked: %v", r))
+				}
+			}()
+			jobHanlder(job)
+		}()
 	}
 }
