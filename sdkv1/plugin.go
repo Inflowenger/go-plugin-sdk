@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	natsHandler "github.com/Inflowenger/go-plugin-sdk/nats"
@@ -128,13 +129,43 @@ func (p *Plugin) Send(subject string, data []byte) (*nats.Msg, error) {
 	return nil, fmt.Errorf("exception occurred")
 
 }
+// normalizeInfraURL turns whatever INFRA_URL carries into the "host:port" the
+// NATS handler dials. Both spellings are accepted: the bare "host:port" the
+// Infra API hands out, and a full "nats://host:port" for anyone who writes the
+// scheme out.
+//
+// url.Parse cannot validate the bare form on its own. With no scheme, Go reads
+// "inflow-infra:4222" as scheme "inflow-infra" — which happens to succeed — and
+// rejects an endpoint whose host does not start with a letter:
+//
+//	parse "172.28.0.1:4222": first path segment in URL cannot contain colon
+//
+// That is every deployment pointed at Infra by IP, so parsing under an assumed
+// scheme is what makes the two spellings behave the same.
+func normalizeInfraURL(raw string) (string, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", fmt.Errorf("INFRA_URL is empty")
+	}
+	if !strings.Contains(s, "://") {
+		s = "nats://" + s
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return "", fmt.Errorf("invalid INFRA_URL %q: %w", raw, err)
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("invalid INFRA_URL %q: no host", raw)
+	}
+	return u.Host, nil
+}
+
 func WithDotEnv(envFile string) func(*Plugin) error {
 	return func(p *Plugin) error {
 		env := NewEnv(envFile)
 		p.PluginId = env.getEnvVar("PLUGIN_ID")
 		credential := env.getEnvVar("INFRA_CRED")
-		infraUrl := env.getEnvVar("INFRA_URL")
-		_, err := url.Parse(infraUrl)
+		infraUrl, err := normalizeInfraURL(env.getEnvVar("INFRA_URL"))
 		if err != nil {
 			return err
 		}
@@ -170,15 +201,22 @@ func WithPluginId(pluginId string) func(*Plugin) error {
 
 func WithInfraConnection(infraUrl, credential string) func(*Plugin) error {
 	return func(p *Plugin) error {
-		u, err := url.Parse(infraUrl)
+		host, err := normalizeInfraURL(infraUrl)
 		if err != nil {
 			return err
 		}
-		ic, err := natsHandler.New(credential, u.Host)
+		ic, err := natsHandler.New(credential, host)
 		if err != nil {
 			return err
 		}
 		p.infraConn = ic
+		return nil
+	}
+}
+
+func WithConnection(nc *natsHandler.Nats) func(*Plugin) error {
+	return func(p *Plugin) error {
+		p.infraConn = nc
 		return nil
 	}
 }
