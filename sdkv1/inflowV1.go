@@ -154,6 +154,61 @@ func (p *Plugin) metaFunchandler() {
 	}
 }
 
+// signalsHandler subscribes the registered signal handler (Plugin.OnSignal) to
+// the whole signal port, `inflow.plugin.<PLUGIN_ID>.>`. A plugin that never
+// called OnSignal subscribes to nothing — the port is opt-in.
+func (p *Plugin) signalsHandler() error {
+	if p.signalFn == nil {
+		return nil
+	}
+	conn := p.infraConn.GetConnection()
+	if conn == nil {
+		return fmt.Errorf("connection error occurred")
+	}
+	handler := p.signalFn
+	_, err := conn.Subscribe(p.makeSignalSubject(), func(msg *nats.Msg) {
+		sig := p.parseSignal(msg)
+		// Off the dispatch goroutine, like a job handler: a signal handler that
+		// blocks (closing a stream, aborting an upstream call) must not stall
+		// the signals that follow it, and nats.go does not recover panics in a
+		// callback, so an unguarded one would take the whole plugin down.
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("signal handler panicked on %s: %v", sig.Subject, r)
+				}
+			}()
+			handler(sig)
+		}()
+	})
+	if err != nil {
+		log.Printf("subscribe error: %s on %s\n", err.Error(), p.makeSignalSubject())
+		return fmt.Errorf("failed to subscribe to signal subject")
+	}
+	log.Printf("Signals Subscribed on : %s", p.makeSignalSubject())
+	return nil
+}
+
+// parseSignal turns a raw signal message into a Signal: Kind is whatever the
+// subject carries past the plugin's prefix, and a payload that parses as the
+// runtime's `{conclusion, jobId}` body fills the typed fields. A payload that
+// does not parse is not an error — an unmodelled future kind still reaches the
+// handler with its bytes intact.
+func (p *Plugin) parseSignal(msg *nats.Msg) Signal {
+	sig := Signal{
+		Kind:    PluginSignal(strings.TrimPrefix(msg.Subject, fmt.Sprintf("inflow.plugin.%s.", p.PluginId))),
+		Subject: msg.Subject,
+		Data:    slices.Clone(msg.Data),
+		Msg:     msg,
+	}
+	var body signalBody
+	if err := sonic.Unmarshal(msg.Data, &body); err == nil {
+		sig.JobId = body.JobId
+		sig.Conclusion = Conclusion(body.Conclusion)
+	}
+	return sig
+}
+
 func (p *Plugin) actionsHandler() {
 	conn := p.infraConn.GetConnection()
 	if conn == nil {
@@ -226,6 +281,12 @@ func (p *Plugin) makeIntroSubject() string {
 // makeActionCpu creates a subject for CPU/job processing (original purpose)
 func (p *Plugin) makeActionCpu(action string) string {
 	return fmt.Sprintf("inflow.cpu.%s.%s", p.PluginId, action)
+}
+
+// makeSignalSubject creates the wildcard subject for the plugin's signal port —
+// every runtime signal about this plugin's processes, whatever its kind.
+func (p *Plugin) makeSignalSubject() string {
+	return fmt.Sprintf("inflow.plugin.%s.>", p.PluginId)
 }
 
 // makeFormSubject creates a subject for form requests

@@ -39,6 +39,7 @@ type Plugin struct {
 	settings    *Settings
 	actions     []Action
 	metaFn      []Meta
+	signalFn    SignalHandler
 	sendTimeout time.Duration
 }
 
@@ -83,11 +84,41 @@ func (p *Plugin) Start() error {
 	}
 	p.actionsHandler()
 	p.metaFunchandler()
+	if err := p.signalsHandler(); err != nil {
+		return err
+	}
 
 	return nil
 }
 func (p *Plugin) GetPluginId()string{
 	return p.PluginId
+}
+
+// OnSignal registers the handler for the plugin's signal port — every subject
+// under `inflow.plugin.<PLUGIN_ID>.>`, the runtime's one-way broadcast channel
+// about processes this plugin is running (see Signal). Call it before Start,
+// which does the subscribing; passing nil registers a handler that only logs
+// what arrives, which is enough to watch the port during development.
+//
+// It is entirely OPTIONAL. A plugin that never calls it behaves exactly as
+// before, and that is the norm: when a process is stopped or times out, the
+// job the plugin took on deliberately keeps running, because a later process
+// may pick up where it left off — the runtime hands the previous jobId back in
+// `_registry`, so progress made after the stop is not wasted. Register a
+// handler only for the cases where the work itself must also stop: a stream to
+// close, an upstream call to abort, a reservation to release. Then test
+// sig.Conclusion.Canceled() and cancel the work you filed under sig.JobId.
+//
+// Only the last registered handler is kept. Handlers run on their own
+// goroutine, so signals for different jobs may overlap, and a panic inside one
+// is recovered and logged rather than taking the process down.
+func (p *Plugin) OnSignal(handler SignalHandler) {
+	if handler == nil {
+		handler = func(sig Signal) {
+			log.Printf("signal on %s received: %s", sig.Subject, string(sig.Data))
+		}
+	}
+	p.signalFn = handler
 }
 func (p *Plugin) Send(subject string, data []byte) (*nats.Msg, error) {
 	conn := p.infraConn.GetConnection()
@@ -220,3 +251,4 @@ func WithConnection(nc *natsHandler.Nats) func(*Plugin) error {
 		return nil
 	}
 }
+

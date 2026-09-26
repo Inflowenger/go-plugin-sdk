@@ -1,6 +1,6 @@
 ---
 name: inflow-plugin
-description: Build an Inflowenger Plugin node with the Go go-plugin-sdk (sdkv1). Use when the user asks to create, scaffold, or extend an inflow/Inflowenger plugin — adding an action, parsing request input, reporting progress, reading/writing flow context, building the action's UI form, or wiring settings. Not for extrinsic nodes (those belong to inflow-fusion).
+description: Build an Inflowenger Plugin node with the Go go-plugin-sdk (sdkv1). Use when the user asks to create, scaffold, or extend an inflow/Inflowenger plugin — adding an action, parsing request input, reporting progress, reading/writing flow context, building the action's UI form, wiring settings, or reacting to a stopped/timed-out process. Not for extrinsic nodes (those belong to inflow-fusion).
 ---
 
 # Building an Inflowenger Plugin node
@@ -112,7 +112,22 @@ registered via `inflow-fusion`, a different repo, and are out of scope here.
    - There is no error channel: write failures into a readonly status field in
      the patch, or the button appears to do nothing.
    Full contract: `docs/form-builder.md` and the catalog's `dependent-fields.md`.
-6. **Build & run**: `go build ./...`, then `go run .`; the SDK logs each subscribed
+6. **Only if in-flight work must stop with the process**, register a signal
+   handler before `Start()`:
+   ```go
+   p.OnSignal(func(sig sdkv1.Signal) {   // inflow.plugin.<PLUGIN_ID>.>
+       if sig.Conclusion.Canceled() {    // flow_stop_by_user / stop_command / timeout / idle
+           cancelWorkFor(sig.JobId)      // sig.JobId == the Job.JobId you were given
+       }
+   })
+   ```
+   This is **optional and not the default**: a stopped process deliberately does
+   not stop the job, because a later run of the node may build on its progress
+   (the previous `jobId` comes back in `_registry`). Add it only for a stream to
+   close, an upstream call to abort, a lock to release. Signals also arrive on
+   success, so always filter on `sig.Conclusion`; and once one lands, the runtime
+   no longer answers that job's commands — do not try to `Done` an abandoned job.
+7. **Build & run**: `go build ./...`, then `go run .`; the SDK logs each subscribed
    subject on startup. Verify by adding the node to a flow and running it.
 
 ## Known limitations to respect

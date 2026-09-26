@@ -336,6 +336,62 @@ p.RequiredParams(&sdkv1.Settings{
 
 ---
 
+## Skill 12 — React when a process ends (signals, optional)
+
+The runtime broadcasts on `inflow.plugin.<PLUGIN_ID>.proc` every time a plugin
+node process ends — with the `jobId` and a conclusion (`done`, `flow_stop_by_user`,
+`timeout`, …). `p.OnSignal` subscribes to that port; call it **before `Start()`**.
+
+```go
+p.OnSignal(func(sig sdkv1.Signal) {
+    log.Printf("job %s ended: %s", sig.JobId, sig.Conclusion)
+})
+```
+
+**Skip this skill unless you need it.** A stopped or timed-out process does *not*
+stop the job you accepted, by design: the next run of that node may build on the
+progress this one made — the runtime hands the previous `jobId` back in
+`_registry`. Only reach for `OnSignal` when the work itself must die with the
+process: an open stream, a paid upstream call, a held lock.
+
+The working pattern is to file the cancel under the `jobId` and let the signal
+find it:
+
+```go
+var inflight sync.Map // jobId -> context.CancelFunc
+
+p.OnSignal(func(sig sdkv1.Signal) {
+    if !sig.Conclusion.Canceled() { // done / next / failed: nothing to abort
+        return
+    }
+    if cancel, ok := inflight.LoadAndDelete(sig.JobId); ok {
+        cancel.(context.CancelFunc)()
+    }
+})
+
+p.AddAction(sdkv1.Action{Method: "long.export", RequestHandler: func(job sdkv1.Job) {
+    ctx, cancel := context.WithCancel(context.Background())
+    inflight.Store(job.JobId, cancel)
+    defer func() { cancel(); inflight.Delete(job.JobId) }()
+
+    // ... work that honours ctx ...
+    job.Done(map[string]any{"ok": true})
+}})
+```
+
+Gotchas:
+
+- Signals arrive on **success too** — always filter on `sig.Conclusion`
+  (`Canceled()` / `Succeeded()`).
+- When the signal lands the runtime has already stopped listening to that job, so
+  an abandoned handler's `Progress`/`Done` will find no responder. Wind down
+  quietly.
+- Handlers run on their own goroutine; only the last one registered is kept.
+
+Full treatment: [docs/jobs-and-commands.md § Signals](docs/jobs-and-commands.md#signals--when-the-runtime-ends-a-process).
+
+---
+
 ## Recipe A — An adapter action (external I/O)
 
 The canonical shape: typed input → progress → external work → shaped output. (This
@@ -398,6 +454,9 @@ p.AddAction(sdkv1.Action{Method: "fn", RequestHandler: func(job sdkv1.Job) {
 Because the plugin is a persistent process, an action can kick off background work,
 or the plugin can hold connections and run loops between requests. Keep any shared
 state on your own types and guard it; each `RequestHandler` runs per invocation.
+This is the plugin shape most likely to want [Skill 12](#skill-12--react-when-a-process-ends-signals-optional):
+background work that should be torn down when the process that started it is
+stopped.
 
 ```go
 func main() {

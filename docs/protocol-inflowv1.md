@@ -20,6 +20,11 @@ Two conventions classify every subject, and they carry the meaning:
 So, read a subject by its markers: a `@` part means "describe/configure me" (UI &
 arguments); `cpu` means "run me" (the Fractal's runtime call).
 
+Alongside those two request/reply planes sits a third, one-way one:
+**`inflow.plugin.*` is the signal port** — fire-and-forget broadcasts *out of* the
+runtime about processes it ran. Nothing there is a request, and a plugin need not
+listen at all.
+
 ### `inflow.v1.*` — metadata / UI & arguments plane (the `@` subjects)
 
 Everything here is discovery: no work runs, it only feeds the UI and collects
@@ -50,6 +55,49 @@ The `<CMD>` values on the last subject are the job commands:
 | `commit` | `job.CmdSetOnPath` | Write data into context at a JSON path (`commit_on`, `$this` allowed). |
 | `next_tags` | `job.CmdNextFilter` | Route outbound ports: keep only the named tags. |
 | `request/svc.<ACTION>` | `job.CmdSvcCall` | Call a backend service through the runtime. The action rides in the subject (`request/svc.log`, `request/svc.add.db.record`, …) and is not a registered extrinsics subject — the runtime cuts the prefix and re-issues the request to the bare action on the plugin space. Payload is a `{data, op}` envelope, forwarded with an `origin: plugin:<node title>` header so the backend can refuse ungranted plugin-originated calls. |
+
+### `inflow.plugin.*` — signal port (one-way, optional)
+
+| Subject | Direction | Purpose | Response |
+|---------|-----------|---------|----------|
+| `inflow.plugin.<PLUGIN_ID>.proc` | runtime → plugin | Announce that a plugin node **process has ended**, and how. | none — it is a `publish`, not a request |
+
+The payload is:
+
+```json
+{ "conclusion": "flow_stop_by_user", "jobId": "9f0c1f8e-…" }
+```
+
+`jobId` is the same uuid the plugin minted in the handshake below, so a signal can
+be matched to work the plugin still has in flight. `conclusion` is the runtime's
+verdict on the process:
+
+| `conclusion` | Meaning |
+|--------------|---------|
+| `done` | The job reported progress 100 and its details were committed. |
+| `next` | The process ended on a routing command (`next_tags`). |
+| `flow_stop_by_user` / `stop_command` | A user (or a stop command) halted the flow. |
+| `timeout` | The workflow's deadline expired while the job ran. |
+| `long_time_without_command` | The node's idle window passed with no command from the plugin. |
+| `bad_request` | A command carried a payload or path the runtime refused. |
+| `anomaly_request` | The job issued an abnormal number of commands (>1500) and was cut off. |
+| `failure` / `internal_error` | The flow failed, or the runtime failed on its own side. |
+| `plugin_not_responded` | The plugin never acknowledged the execution request with a `jobId`. |
+| `unknow_cause` | The process was cancelled with no recognizable cause (spelling is the runtime's). |
+
+Two things follow from this being a **broadcast about every ending**, not a
+cancellation callback:
+
+- A `proc` signal arrives for successful processes too, so a handler must switch
+  on `conclusion` rather than assume the worst.
+- Once it is out, the runtime has stopped listening on that job's command
+  subjects — a handler still running will find no responder for `progress`,
+  `commit` or a context read.
+
+The SDK subscribes to the whole port with a wildcard
+(`inflow.plugin.<PLUGIN_ID>.>`) so a future signal kind reaches the same handler.
+See [jobs-and-commands.md § Signals](jobs-and-commands.md#signals--when-the-runtime-ends-a-process)
+for the SDK side, `Plugin.OnSignal`.
 
 ## The request → job handshake
 

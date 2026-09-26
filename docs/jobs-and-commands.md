@@ -298,6 +298,103 @@ The receiving side — subscribing to action subjects on the plugin space and th
 grant policy — is implemented with **inflow-fusion**; see that repo's
 `docs/plugin-svc-calls.md`.
 
+## Signals — when the runtime ends a process
+
+Everything above is the job talking *to* the runtime. The signal port is the one
+channel that runs the other way: the runtime publishes on
+`inflow.plugin.<PLUGIN_ID>.proc` the moment it stops attending a plugin node
+process, saying which job ended and how.
+
+```go
+p.OnSignal(func(sig sdkv1.Signal) {
+    if sig.Kind != sdkv1.RuntimeProcessSignal {
+        return
+    }
+    fmt.Printf("job %s ended: %s\n", sig.JobId, sig.Conclusion)
+})
+```
+
+Register it **before `Start()`** — `Start()` does the subscribing. `OnSignal(nil)`
+installs a handler that just logs the port, which is handy while developing.
+
+```go
+type Signal struct {
+    Kind       PluginSignal // "proc" — the subject past inflow.plugin.<PLUGIN_ID>.
+    Subject    string
+    JobId      string       // the job this is about: the same id as Job.JobId
+    Conclusion Conclusion   // how the runtime ended it
+    Data       []byte       // raw payload, for kinds this SDK does not model
+    Msg        *nats.Msg    // escape hatch; a signal is a publish — never respond
+}
+```
+
+`Conclusion` has the full list of verdicts (see
+[protocol-inflowv1.md](protocol-inflowv1.md#inflowplugin--signal-port-one-way-optional))
+plus two predicates:
+
+| Predicate | True for |
+|-----------|----------|
+| `sig.Conclusion.Succeeded()` | `done`, `next` — the job ended the way it intended. |
+| `sig.Conclusion.Canceled()`  | `flow_stop_by_user`, `stop_command`, `timeout`, `long_time_without_command` — something outside the job cut it short. |
+
+### Why this is optional, and why stopping is not the default
+
+**A stopped process does not mean a stopped job.** When a user cancels a flow or a
+workflow times out, the work the plugin took on deliberately keeps running. A
+later process on the same node may rely on the progress this one made: the
+runtime hands the previous `jobId` back in `_registry` (and the plugin sees it
+again in the next execution's request), so a half-built export, an open import
+cursor or a warmed cache is an asset, not garbage. Dropping it on every
+cancellation would throw that away.
+
+So the SDK does nothing about `proc` signals unless you ask. A plugin that never
+calls `OnSignal` behaves exactly as it always has — **nothing breaks by ignoring
+this**. Register a handler only for work that genuinely must not outlive the
+process: a stream to close, an upstream request to abort, a lock or reservation
+to release, a spend to stop.
+
+The pattern is to file cancellable work under its `jobId` and let the signal find
+it:
+
+```go
+var inflight sync.Map // jobId -> context.CancelFunc
+
+p.OnSignal(func(sig sdkv1.Signal) {
+    if !sig.Conclusion.Canceled() {
+        return // done / next / failed — nothing to abort
+    }
+    if cancel, ok := inflight.LoadAndDelete(sig.JobId); ok {
+        cancel.(context.CancelFunc)()
+    }
+})
+
+p.AddAction(sdkv1.Action{Method: "long.export", RequestHandler: func(job sdkv1.Job) {
+    ctx, cancel := context.WithCancel(context.Background())
+    inflight.Store(job.JobId, cancel)
+    defer func() { cancel(); inflight.Delete(job.JobId) }()
+
+    if err := exportWithContext(ctx, job); err != nil {
+        job.DoneWithError(err.Error())
+        return
+    }
+    job.Done(map[string]any{"ok": true})
+}})
+```
+
+Two things to keep in mind while writing one:
+
+- **Signals arrive for every ending, including `done`.** Filter on
+  `Conclusion` — a handler that cancels unconditionally will cancel successful
+  jobs too (harmlessly here, because the job is finished, but it is the wrong
+  habit).
+- **The runtime is already gone.** By the time the signal lands, that job's
+  command subjects have no responder: a `Progress` or `Done` from the abandoned
+  handler will retry and fail. Wind the work down; do not try to report it.
+
+Handlers run on their own goroutine (so a slow one does not stall the port) and a
+panic inside one is recovered and logged. Only the last registered handler is
+kept.
+
 ## Command reference
 
 | Method | Command subject suffix | Payload → | Returns |

@@ -157,3 +157,44 @@ type CallSvcBody struct{
 	Data any `json:"data"`
 	OperationData map[string]any `json:"op"`
 }
+
+// SignalHandler receives every message that lands on the plugin's signal port.
+// Registered with Plugin.OnSignal.
+type SignalHandler func(sig Signal)
+
+// Signal is one runtime message on the plugin's signal port,
+// `inflow.plugin.<PLUGIN_ID>.<KIND>` — a broadcast OUT of the runtime about a
+// process, not a request: nothing is expected back and no reply is read.
+//
+// Today the only kind is RuntimeProcessSignal ("proc"), published when the
+// runtime finishes with a plugin node process; the port is a wildcard
+// subscription, so future kinds arrive at the same handler with a different
+// Kind and, possibly, a payload this struct does not model — hence Data.
+type Signal struct {
+	// Kind is the subject remainder after `inflow.plugin.<PLUGIN_ID>.`, e.g.
+	// "proc". Switch on it before trusting the parsed fields below.
+	Kind PluginSignal
+	// Subject is the full NATS subject the signal arrived on.
+	Subject string
+	// JobId is the job this signal is about — the very uuid the SDK minted in
+	// the request→job handshake and handed to the handler as Job.JobId, so a
+	// plugin can match a signal to the work it still has in flight.
+	JobId string
+	// Conclusion is how the runtime ended that process. Set for "proc" signals;
+	// empty for a kind that carries no conclusion.
+	Conclusion Conclusion
+	// Data is the raw payload, kept verbatim so an unmodelled future kind is
+	// still readable.
+	Data []byte
+	// Msg is the underlying NATS message (headers, subject, reply). Present for
+	// the escape hatch; a signal is a publish, so do not respond to it.
+	Msg *nats.Msg
+}
+
+// signalBody is the JSON the runtime publishes on a "proc" signal. Parsed into
+// Signal's typed fields; a payload that does not fit leaves them zero and is
+// still delivered as Data.
+type signalBody struct {
+	Conclusion string `json:"conclusion"`
+	JobId      string `json:"jobId"`
+}

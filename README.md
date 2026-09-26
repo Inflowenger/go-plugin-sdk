@@ -77,7 +77,7 @@ go get github.com/Inflowenger/go-plugin-sdk@latest
 import "github.com/Inflowenger/go-plugin-sdk/sdkv1"
 ```
 
-Requires **Go 1.26+** and a reachable Inflowenger platform (Infra + at least one
+Requires **Go 1.27+** and a reachable Inflowenger platform (Infra + at least one
 Fractal). To stand one up locally, follow the
 [getting-started](https://github.com/Inflowenger/getting-started) guide.
 
@@ -192,13 +192,21 @@ p.AddAction(sdkv1.Action{
     RequestHandler: func(job sdkv1.Job) { /* the work */ },
 })
 
-// 4. Start serving and block
+// 4. (optional) Listen to the runtime's signal port — told when a process this
+//    plugin ran has ended, and how. Only needed if in-flight work must stop too.
+p.OnSignal(func(sig sdkv1.Signal) {
+    if sig.Conclusion.Canceled() {
+        cancelWorkFor(sig.JobId)
+    }
+})
+
+// 5. Start serving and block
 p.Start()
 select {}
 ```
 
 `Start()` wires up all the NATS subscriptions (intro, settings, action list, per-action
-forms, and per-action executors) and returns. Because the SDK subscribes
+forms, per-action executors, and the signal port when a handler was registered) and returns. Because the SDK subscribes
 asynchronously, your `main` must block afterwards (`select {}`) to keep the process
 alive.
 
@@ -256,14 +264,44 @@ Full details, semantics, and the underlying subjects are in
 
 ---
 
+## Signals — knowing a process ended (`OnSignal`)
+
+The runtime broadcasts on `inflow.plugin.<PLUGIN_ID>.proc` whenever a plugin node
+process ends, saying which job it was and how it ended: `done`, `flow_stop_by_user`,
+`timeout`, and so on. `p.OnSignal(handler)` — registered before `Start()` —
+subscribes to that port.
+
+```go
+p.OnSignal(func(sig sdkv1.Signal) {
+    switch {
+    case sig.Conclusion.Succeeded():          // done / next
+    case sig.Conclusion.Canceled():           // stopped by user, timeout, idle
+        abort(sig.JobId)                      // sig.JobId == the job's Job.JobId
+    }
+})
+```
+
+**This is optional, and ignoring it is a valid choice.** A stopped process does
+not stop the job: that is on purpose, because the next process on the same node
+may build on the progress this one made — the runtime hands the previous `jobId`
+back in `_registry`, and the plugin sees it again on the next run. Register a
+handler only where the work itself must not outlive the process — a stream to
+close, an upstream call to abort, a reservation to release. Note that a signal
+also arrives on success, and that by the time it lands the runtime no longer
+answers that job's commands.
+
+See [docs/jobs-and-commands.md § Signals](docs/jobs-and-commands.md#signals--when-the-runtime-ends-a-process).
+
+---
+
 ## Documentation
 
 | Doc | What's in it |
 |-----|--------------|
 | [cookbook.md](cookbook.md) | **Start here to build one** — a task-organized cookbook: scaffold, actions, input, progress, context, forms, recipes, ship checklist. |
 | [docs/architecture.md](docs/architecture.md) | Where the plugin node sits in Inflowenger (Context / Workflows / Fractals / Adapters), and the plugin lifecycle. |
-| [docs/protocol-inflowv1.md](docs/protocol-inflowv1.md) | The `inflowv1` wire protocol: every NATS subject, request/response shape, and the request↔job handshake. |
-| [docs/jobs-and-commands.md](docs/jobs-and-commands.md) | The `Job` API in depth — progress, done, context read/write, routing, extrinsics svc calls, stop. |
+| [docs/protocol-inflowv1.md](docs/protocol-inflowv1.md) | The `inflowv1` wire protocol: every NATS subject, request/response shape, the request↔job handshake, and the one-way signal port. |
+| [docs/jobs-and-commands.md](docs/jobs-and-commands.md) | The `Job` API in depth — progress, done, context read/write, routing, extrinsics svc calls, and the signal port (`OnSignal`). |
 | [docs/form-builder.md](docs/form-builder.md) | Building action & settings UIs with JSON Forms + `x-inflow-ui`. |
 | [docs/examples.md](docs/examples.md) | Annotated walkthrough of the `HTTP.CALL` and `RPC` sample plugins. |
 | [docs/inflow-ecosystem.md](docs/inflow-ecosystem.md) | Working notes on the broader Inflowenger platform (seed for the full ecosystem doc). |
@@ -325,11 +363,11 @@ plugin processes rather than one-shot tests.
 go-plugin-sdk/
 ├── sdkv1/                 the v1 SDK
 │   ├── plugin.go          Plugin type, construction, options, NATS Send
-│   ├── inflowV1.go        subject wiring: intro / settings / actions / forms
+│   ├── inflowV1.go        subject wiring: intro / settings / actions / forms / signals
 │   ├── job.go             Job: progress, done, context commands
 │   ├── req.go             request parsing, CastRequestTo, job handshake
 │   ├── models.go          protocol data types (Intro, Action, FormBuilder, ...)
-│   ├── types.go           command constants (progress/stop/context/commit)
+│   ├── types.go           command constants, signal kinds & conclusions
 │   └── dotenv.go          env loading
 ├── nats/
 │   └── natsBox.go         NATS connection from base64 decorated credentials

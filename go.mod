@@ -1,9 +1,9 @@
 module github.com/Inflowenger/go-plugin-sdk
 
-go 1.26.2
+go 1.27
 
 require (
-	github.com/bytedance/sonic v1.15.2
+	github.com/bytedance/sonic v1.15.4
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/nats-io/jwt/v2 v2.8.2
@@ -12,7 +12,7 @@ require (
 
 require (
 	github.com/bytedance/gopkg v0.1.3 // indirect
-	github.com/bytedance/sonic/loader v0.5.1 // indirect
+	github.com/bytedance/sonic/loader v0.5.2 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/klauspost/compress v1.18.5 // indirect

@@ -18,6 +18,11 @@ func TestInit(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
+	// Optional: watch the runtime's signal port. This plugin only logs what it
+	// hears; a plugin holding cancellable work would look at sig.JobId.
+	p.OnSignal(func(sig sdkv1.Signal) {
+		fmt.Printf("signal %s job=%s conclusion=%s canceled=%v\n", sig.Kind, sig.JobId, sig.Conclusion, sig.Conclusion.Canceled())
+	})
 	p.Intro(sdkv1.PluginIntro{Name: "HTTP.CALL", Author: "inflow Dev. Team", Version: "v0.0.1"})
 	p.AddAction(sdkv1.Action{Method: "http.call", RequestHandler: func(job sdkv1.Job) {
 		fmt.Println(string(job.Req.Data))
