@@ -252,7 +252,9 @@ func(job sdkv1.Job) {
 |--------|--------|
 | `job.Progress(pct, Frame)` | Report progress `0–100` with a titled status frame. |
 | `job.Done(data, key...)`   | Complete the job (progress 100) and emit `data` as output; optional key path to commit on. |
-| `job.DoneWithError(msg)`   | Complete with an error payload. |
+| `job.DoneWithError(msg)`   | Complete as failed: `msg` rides on the command's own `error` field, no details committed. |
+| `job.DoneWithErrorData(msg, data, key...)` | Same, but `data` is still reported/committed (nothing in it is reserved). |
+| `job.DoneWithErrorCode(code, msg, data, key...)` | Same, plus the plugin's own error number. |
 | `job.CmdGetCurrentScope()` | Fetch the current context scope (raw bytes). |
 | `job.CmdGetScope(path)`    | Fetch a slice of context by JSON path (e.g. `$.OPA`), or by `$this…` for the node's own location. |
 | `job.CmdSetOnPath(path, m)`| Commit data into the flow context at a JSON path (`$this…` allowed). |

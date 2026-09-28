@@ -217,9 +217,20 @@ job.Done(map[string]any{"status": "ok", "result": result})
 // Success, committing on an explicit key path (segments joined by ".")
 job.Done(payload, "result", "http")
 
-// Failure — completes with an error payload
+// Failure — completes as failed, reporting the reason
 job.DoneWithError("upstream returned 500")
+
+// Failure that still has data to report/commit
+job.DoneWithErrorData("upstream returned 500", map[string]any{"messages": conversation})
+
+// Failure carrying the plugin's own error number too
+job.DoneWithErrorCode(429, "upstream rate limited", nil)
 ```
+
+The reason travels on the command's own `error` field (`{code, message}`), not as a
+detail — so `details` are yours alone, and a bare `DoneWithError` commits nothing.
+`code` is the plugin's own numbering; the core carries it without interpreting it,
+so pass `0` when the plugin has none.
 
 > **Pattern:** on every error branch, `job.DoneWithError(...)` **and `return`**, so
 > the job always terminates once and only once.

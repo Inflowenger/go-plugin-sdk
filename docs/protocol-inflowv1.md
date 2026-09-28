@@ -49,7 +49,7 @@ The `<CMD>` values on the last subject are the job commands:
 
 | `<CMD>` | Sent by | Meaning |
 |---------|---------|---------|
-| `progress` | `job.Progress` / `job.Done` / `job.DoneWithError` | Report progress `0–100` (100 = finished). |
+| `progress` | `job.Progress` / `job.Done` / `job.DoneWithError` | Report progress `0–100` (100 = finished). A terminal payload carrying `error:{code,message}` finishes the job as failed. |
 | `context/current` | `job.CmdGetCurrentScope` | Read the current context scope. |
 | `context/path` | `job.CmdGetScope` | Read context by JSON path. The payload path may use `$this`, which the runtime rewrites to the node's current location before parsing. |
 | `commit` | `job.CmdSetOnPath` | Write data into context at a JSON path (`commit_on`, `$this` allowed). |
@@ -74,14 +74,14 @@ verdict on the process:
 
 | `conclusion` | Meaning |
 |--------------|---------|
-| `done` | The job reported progress 100 and its details were committed. |
+| `done` | The job reported progress 100 without an `error` field, and its details were committed. |
 | `next` | The process ended on a routing command (`next_tags`). |
 | `flow_stop_by_user` / `stop_command` | A user (or a stop command) halted the flow. |
 | `timeout` | The workflow's deadline expired while the job ran. |
 | `long_time_without_command` | The node's idle window passed with no command from the plugin. |
 | `bad_request` | A command carried a payload or path the runtime refused. |
 | `anomaly_request` | The job issued an abnormal number of commands (>1500) and was cut off. |
-| `failure` / `internal_error` | The flow failed, or the runtime failed on its own side. |
+| `failure` / `internal_error` | The flow failed — including a job that finished with an `error` field (`DoneWithError`) — or the runtime failed on its own side. |
 | `plugin_not_responded` | The plugin never acknowledged the execution request with a `jobId`. |
 | `unknow_cause` | The process was cancelled with no recognizable cause (spelling is the runtime's). |
 

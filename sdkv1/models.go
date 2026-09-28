@@ -107,8 +107,9 @@ type Settings struct {
 //     Frame on the node — a pie chart from Progress plus the frame's title and
 //     content. Details may carry partial data.
 //   - Result (Progress 100): the terminal payload. Details is committed to the
-//     node's scope, at CommitOn when set. A failed job (DoneWithError) sends its
-//     reason as Details["error"].
+//     node's scope, at CommitOn when set. Error is set only by DoneWithError
+//     (and its variants) and is what makes the finished job a failed one —
+//     Details is still committed either way.
 //
 // The core mirrors this as models.CommandPayload — keep the two in sync.
 type CommandPayload struct {
@@ -116,6 +117,20 @@ type CommandPayload struct {
 	Frame    Frame          `json:"frame" bson:"frame"`
 	Details  map[string]any `json:"details"`
 	CommitOn string         `json:"commit_on"`
+	Error    *ErrorPayload  `json:"error,omitempty" bson:"error,omitempty"`
+}
+
+// ErrorPayload is how a terminal command reports a failure. Its presence — not
+// its contents — is the verdict: the core concludes the job failed whenever the
+// field is there, even with an empty Message.
+//
+// Code is the plugin's own error number, in the plugin's own numbering. The core
+// does not interpret it or map it onto a fractal status; it carries it so the
+// plugin's owner can be asked what it means. Leave it 0 when the plugin has no
+// such numbering.
+type ErrorPayload struct {
+	Code    int    `json:"code" bson:"code"`
+	Message string `json:"message" bson:"message"`
 }
 
 // Frame is the human-readable content of a sub-100 progress update: Title labels

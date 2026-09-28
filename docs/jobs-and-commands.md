@@ -88,17 +88,28 @@ job.DoneWithError("upstream returned 500")
 
 // Failure that still has something to report/keep — same conclusion, extra details.
 job.DoneWithErrorData("upstream returned 500", map[string]any{"messages": conversation})
+
+// Failure carrying the plugin's own error number alongside the message.
+job.DoneWithErrorCode(429, "upstream rate limited", nil)
 ```
 
-Under the hood all three are a `progress` command at `100`: `Done` sends
-`{progress:100, details:data, commit_on:key}`, `DoneWithError` sends
-`{progress:100, details:{"error":msg}}`, and `DoneWithErrorData` sends the same
-with `data` merged in beside the reason (`error` always wins) and the optional
-`commit_on` key. A handler should call exactly one of them before returning.
+Under the hood all four are a `progress` command at `100`: `Done` sends
+`{progress:100, details:data, commit_on:key}`, and the error variants add the
+`error` field — `{progress:100, error:{code,message}}` — with `details` and
+`commit_on` filled exactly as `Done` fills them. A handler should call exactly
+one of them before returning.
+
+The reason travels on its own `error` field, **not** as a detail. Two things
+follow: nothing in `data` is reserved any more (a key named `error` is the
+plugin's to use), and the presence of that field — not its contents — is what
+makes the finished job a failed one, so an empty message still fails the job.
+`code` is the plugin's own number in the plugin's own numbering: the core carries
+it next to the message so the plugin's owner can be asked what it means, and
+never maps it onto a platform status. Leave it `0` when the plugin has none.
 
 **Failing does not stop the flow.** All three conclude the node the same way — the
-error variants are still a completed job, just one whose committed output is an
-error. Any node can fail; the platform treats that as information rather than
+error variants are still a completed job, just one that reports a failure —
+its `details` are committed either way. Any node can fail; the platform treats that as information rather than
 flow control, reporting the reason on the event stream and writing it into the
 context, then continuing to the next node. That is what makes an error something
 a downstream Rule can branch on. If a failure should change where the flow goes,
@@ -106,8 +117,8 @@ express that on the canvas, not by trying to halt it from inside the plugin.
 
 Reach for `DoneWithErrorData` when the failure is not the whole story. The details
 of a terminal command are what gets committed onto the node's scope, so a bare
-`DoneWithError` — reporting only `error` — drops whatever the node had persisted
-there. Passing that state back through `data` keeps it readable on the next run,
+`DoneWithError` — which sends no details at all — drops whatever the node had
+persisted there. Passing that state back through `data` keeps it readable on the next run,
 and gives the canvas (and any downstream branch the node routed to before
 concluding) the context to act on rather than just a message.
 
@@ -401,8 +412,9 @@ kept.
 |--------|------------------------|-----------|---------|
 | `Progress(pct, Frame)`      | `progress`        | `{progress, frame}` | ack |
 | `Done(data, key...)`        | `progress`        | `{progress:100, details, commit_on}` | ack |
-| `DoneWithError(msg)`        | `progress`        | `{progress:100, details:{error}}` | ack |
-| `DoneWithErrorData(msg, data, key...)` | `progress` | `{progress:100, details:{...data, error}, commit_on}` | ack |
+| `DoneWithError(msg)`        | `progress`        | `{progress:100, error:{message}}` | ack |
+| `DoneWithErrorData(msg, data, key...)` | `progress` | `{progress:100, details, commit_on, error:{message}}` | ack |
+| `DoneWithErrorCode(code, msg, data, key...)` | `progress` | `{progress:100, details, commit_on, error:{code,message}}` | ack |
 | `CmdGetCurrentScope()`      | `context/current` | — | context bytes |
 | `CmdGetScope(jsonPath)`     | `context/path`    | `jsonPath` | context bytes |
 | `CmdSetOnPath(jsonPath, m)` | `commit`          | `{commit_on, details}` | ack |

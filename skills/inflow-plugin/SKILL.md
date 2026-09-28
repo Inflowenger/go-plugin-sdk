@@ -66,7 +66,11 @@ registered via `inflow-fusion`, a different repo, and are out of scope here.
    - `sdkv1.CastRequestTo[T](job.Req.Data)` — typed input (rule 3).
    - `job.Progress(pct, sdkv1.Frame{Title, Content})` — advisory, 0–100; does not finish.
    - `job.Done(map[string]any, key ...string)` — success + output (finishes).
-   - `job.DoneWithError(string)` — failure (finishes).
+   - `job.DoneWithError(string)` — failure (finishes); the reason goes on the
+     command's own `error` field, never into `details`.
+   - `job.DoneWithErrorData(string, map[string]any, key ...string)` — failure that
+     still reports/commits data. `job.DoneWithErrorCode(int, string, map[string]any, key ...string)`
+     adds the plugin's own error number (pass `0` when it has none).
    - `job.CmdGetCurrentScope()` / `job.CmdGetScope("$.path")` — read context; both
      return `any`, type-assert to `[]byte`.
    - `job.CmdSetOnPath("$.path", map[string]any{...})` — write into flow context.

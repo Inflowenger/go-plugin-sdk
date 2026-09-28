@@ -23,33 +23,45 @@ func (j *Job) Done(data map[string]any, key ...string) any {
 
 }
 
-// DoneWithError ends the job as failed, reporting the reason as its only detail.
+// DoneWithError ends the job as failed, reporting `error` as the reason.
+//
+// The reason no longer travels as a detail: it goes in CommandPayload.Error, its
+// own field on the terminal command, and Details is left untouched. So the job
+// commits nothing and the flow sees a failure with a message.
 func (j *Job) DoneWithError(error string) any {
 
-	return j.DoneWithErrorData(error, nil)
+	return j.DoneWithErrorCode(0, error, nil)
 
 }
 
 // DoneWithErrorData ends the job as failed exactly like DoneWithError, but keeps
-// a payload: `data` is reported (and committed, at `key` when given) next to the
-// reason, which always lands on the canonical "error" detail — so a key named
-// "error" inside `data` is overwritten.
+// a payload: `data` is reported (and committed, at `key` when given) alongside
+// the reason. Nothing in `data` is reserved — the reason rides on its own field,
+// so a key named "error" is now the plugin's to use.
 //
 // Use it when the failure still carries something the flow needs: the state the
 // node reached, a partial result, or scope the node must not drop. That last one
 // matters because a terminal command's details ARE what gets committed onto the
-// node's scope — a bare DoneWithError reports only "error", so anything the node
-// had persisted there (a conversation, a cursor) is gone by the next read. Hand
-// it back through `data` to keep it.
+// node's scope — a bare DoneWithError commits nothing, so anything the node had
+// persisted there (a conversation, a cursor) is gone by the next read. Hand it
+// back through `data` to keep it.
 func (j *Job) DoneWithErrorData(error string, data map[string]any, key ...string) any {
 
-	details := make(map[string]any, len(data)+1)
-	for k, v := range data {
-		details[k] = v
-	}
-	details["error"] = error
+	return j.DoneWithErrorCode(0, error, data, key...)
 
-	return j.Command(ProgressCommand, CommandPayload{Progress: 100, Details: details, CommitOn: strings.Join(key, ".")})
+}
+
+// DoneWithErrorCode is DoneWithErrorData with the plugin's own error number
+// attached. `code` belongs to the plugin's numbering — the core carries it next
+// to the message and never interprets it — so pass 0 when the plugin has none.
+func (j *Job) DoneWithErrorCode(code int, error string, data map[string]any, key ...string) any {
+
+	return j.Command(ProgressCommand, CommandPayload{
+		Progress: 100,
+		Details:  data,
+		CommitOn: strings.Join(key, "."),
+		Error:    &ErrorPayload{Code: code, Message: error},
+	})
 
 }
 
