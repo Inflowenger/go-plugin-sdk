@@ -113,9 +113,24 @@ registered via `inflow-fusion`, a different repo, and are out of scope here.
    - Return the **patch object** (`map[string]any{"assignee": "5b10…"}`), not
      `sdkv1.Response` — the latter's `{data,error}` envelope gets patched in as
      fields called `data` and `error`. Patch keys are absolute leaf paths.
-   - There is no error channel: write failures into a readonly status field in
-     the patch, or the button appears to do nothing.
-   Full contract: `docs/form-builder.md` and the catalog's `dependent-fields.md`.
+   - There is no error channel in the transport. Say what happened under the
+     reserved `x-inflow-notif` key, which the host lifts out of the answer and
+     shows — or the button appears to do nothing. `formkit` builds it:
+     ```go
+     return formkit.Success("Issue: %s", key).Patch(map[string]any{"issueKey": key})
+     return formkit.Failure("cannot reach %s: %s", site, err).Patch(nil) // message only
+     ```
+     `formkit.Info` / `Success` / `Warning` / `Failure` / `Help` are the five
+     severities; `.About(field)` re-aims a message, `.Patch(nil)` is a valid
+     answer on its own (a connection test writes nothing). The message defaults
+     to the field the button targets; a field some *other* control fills needs
+     `.Inline()` on it so the host has somewhere to put it. Do **not** add a
+     readonly `lookupStatus`-style property for this — a message is not form
+     data, and one declared as a field is sent to the service and stored with
+     the rest.
+   Full contract: `docs/form-builder.md` and the catalog's `dependent-fields.md`
+   (that doc still describes the pre-`x-inflow-notif` status-field workaround;
+   the notification channel above supersedes it).
 6. **Only if in-flight work must stop with the process**, register a signal
    handler before `Start()`:
    ```go
