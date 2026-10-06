@@ -9,6 +9,16 @@ If you want the concepts behind these recipes, read the docs first:
 · [jobs & commands](docs/jobs-and-commands.md) · [form builder](docs/form-builder.md)
 · [examples](docs/examples.md).
 
+Also worth keeping open: the **[plugin catalog](https://github.com/Inflowenger/plugin-catalog)** — the developer
+knowledge base ([concepts](https://github.com/Inflowenger/plugin-catalog/blob/main/docs/concepts.md) ·
+[build a plugin](https://github.com/Inflowenger/plugin-catalog/blob/main/docs/build-a-plugin.md) ·
+[run a plugin](https://github.com/Inflowenger/plugin-catalog/blob/main/docs/run-a-plugin.md) ·
+[dependent fields](https://github.com/Inflowenger/plugin-catalog/blob/main/docs/dependent-fields.md) ·
+[SDK matrix](https://github.com/Inflowenger/plugin-catalog/blob/main/docs/sdks.md) ·
+[publishing](https://github.com/Inflowenger/plugin-catalog/blob/main/docs/publishing.md)) and
+[`plugins/`](https://github.com/Inflowenger/plugin-catalog/tree/main/plugins), an entry per shipped plugin pointing at its
+real source — the best worked examples there are.
+
 > **Using an AI coding agent?** This repo ships a companion **Agent Skill** at
 > [`skills/inflow-plugin/SKILL.md`](skills/inflow-plugin/SKILL.md) — a `SKILL.md`
 > (frontmatter + agent-directed rules) distilling this guide for a code agent.

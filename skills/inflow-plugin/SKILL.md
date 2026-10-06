@@ -20,6 +20,24 @@ for detail — this file is the operational checklist. Verify the current API ag
 the installed `go-plugin-sdk/sdkv1` package before relying on any signature; do not
 invent methods.
 
+The **[plugin catalog](https://github.com/Inflowenger/plugin-catalog)** is the other live resource worth reading: it
+carries the current developer knowledge base —
+[`concepts.md`](https://github.com/Inflowenger/plugin-catalog/blob/main/docs/concepts.md) (the mental model),
+[`build-a-plugin.md`](https://github.com/Inflowenger/plugin-catalog/blob/main/docs/build-a-plugin.md) (build from zero),
+[`run-a-plugin.md`](https://github.com/Inflowenger/plugin-catalog/blob/main/docs/run-a-plugin.md),
+[`dependent-fields.md`](https://github.com/Inflowenger/plugin-catalog/blob/main/docs/dependent-fields.md),
+[`sdks.md`](https://github.com/Inflowenger/plugin-catalog/blob/main/docs/sdks.md) (the SDK matrix) and
+[`publishing.md`](https://github.com/Inflowenger/plugin-catalog/blob/main/docs/publishing.md) — plus
+[`plugins/`](https://github.com/Inflowenger/plugin-catalog/tree/main/plugins), an entry per shipped plugin pointing at its
+real source. Those are the best worked examples available: in Go, [jira-plugin](https://github.com/mehdi-shokohi/jira-plugin) (14 actions),
+[postgres-plugin](https://github.com/FloMorphic/postgres-plugin),
+[mongodb-plugin](https://github.com/FloMorphic/mongodb-plugin) and
+[google-office-oc-plugin](https://github.com/FloMorphic/google-office-oc-plugin)
+(30 actions). Prefer their
+patterns over inventing your own, and check
+[`plugins/index.json`](https://github.com/Inflowenger/plugin-catalog/blob/main/plugins/index.json) for the machine-readable
+list.
+
 ## When to use
 
 Use this when the task involves creating or modifying an inflow **plugin** node:
@@ -74,6 +92,9 @@ registered via `inflow-fusion`, a different repo, and are out of scope here.
    - `job.CmdGetCurrentScope()` / `job.CmdGetScope("$.path")` — read context; both
      return `any`, type-assert to `[]byte`.
    - `job.CmdSetOnPath("$.path", map[string]any{...})` — write into flow context.
+   - `job.CmdNextFilter([]string{...})` — fire only the outbound branch(es) with
+     these tags (the runtime counterpart of the action's declared
+     `Outbound: []sdkv1.OutboundPort{...}`).
    - Any path above may start at `$this`, inflow's non-standard root for the
      location this run was handed (the slice the node's `scope` selected), e.g.
      `job.CmdGetScope("$this.customer.id")`. Prefer it over a hardcoded index
@@ -86,7 +107,9 @@ registered via `inflow-fusion`, a different repo, and are out of scope here.
 4. **Add forms** when the node needs configuration:
    `sdkv1.FormBuilder{Jsonschema: <JSON Schema>, Jsonui: <UI Schema>}` (JSON Forms).
    For plugin-level onboarding/config use `p.RequiredParams(&sdkv1.Settings{...})`
-   with a `SubmitHandler`.
+   with a `SubmitHandler`. An optional Markdown manual for the plugin's page goes
+   on `sdkv1.PluginIntro{Manual: ...}`; a fenced ` ```inflow-meta ` block naming a
+   meta method becomes a Run button.
 5. **Make dependent fields work.** Any field a user cannot type from memory (an
    `accountId`, a project key, an id valid only inside another selection) must not
    ship as a bare text input. Register a **meta function** and put a button on the
