@@ -154,32 +154,18 @@ func (p *Plugin) metaFunchandler() {
 	}
 }
 
-// signalsHandler subscribes the registered signal handler (Plugin.OnSignal) to
-// the whole signal port, `inflow.plugin.<PLUGIN_ID>.>`. A plugin that never
-// called OnSignal subscribes to nothing — the port is opt-in.
+// signalsHandler subscribes the whole signal port, `inflow.plugin.<PLUGIN_ID>.>`,
+// for every plugin, whether or not it called OnSignal: the SDK is a listener in
+// its own right, routing stops to the jobs running under NewCancelableJobHandler
+// — and it cannot tell from a JobHandler whether it is one, so it cannot skip
+// the port for a plugin that has none. See dispatchSignal.
 func (p *Plugin) signalsHandler() error {
-	if p.signalFn == nil {
-		return nil
-	}
 	conn := p.infraConn.GetConnection()
 	if conn == nil {
 		return fmt.Errorf("connection error occurred")
 	}
-	handler := p.signalFn
 	_, err := conn.Subscribe(p.makeSignalSubject(), func(msg *nats.Msg) {
-		sig := p.parseSignal(msg)
-		// Off the dispatch goroutine, like a job handler: a signal handler that
-		// blocks (closing a stream, aborting an upstream call) must not stall
-		// the signals that follow it, and nats.go does not recover panics in a
-		// callback, so an unguarded one would take the whole plugin down.
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("signal handler panicked on %s: %v", sig.Subject, r)
-				}
-			}()
-			handler(sig)
-		}()
+		p.dispatchSignal(p.parseSignal(msg))
 	})
 	if err != nil {
 		log.Printf("subscribe error: %s on %s\n", err.Error(), p.makeSignalSubject())
@@ -187,6 +173,32 @@ func (p *Plugin) signalsHandler() error {
 	}
 	log.Printf("Signals Subscribed on : %s", p.makeSignalSubject())
 	return nil
+}
+
+// dispatchSignal hands one signal to its two listeners, in order. First the
+// SDK's own: a stop for a job this process runs under NewCancelableJobHandler
+// cancels that job — inline, because cancelling never blocks, and because the
+// job should be stopping before any handler of the plugin's reacts to the stop.
+// Then the handler registered with OnSignal, if any.
+func (p *Plugin) dispatchSignal(sig Signal) {
+	p.cancels.handleSignal(sig)
+
+	handler := p.signalFn
+	if handler == nil {
+		return
+	}
+	// Off the dispatch goroutine, like a job handler: a signal handler that
+	// blocks (closing a stream, aborting an upstream call) must not stall the
+	// signals that follow it, and nats.go does not recover panics in a
+	// callback, so an unguarded one would take the whole plugin down.
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("signal handler panicked on %s: %v", sig.Subject, r)
+			}
+		}()
+		handler(sig)
+	}()
 }
 
 // parseSignal turns a raw signal message into a Signal: Kind is whatever the

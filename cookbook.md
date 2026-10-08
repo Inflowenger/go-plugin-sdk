@@ -357,57 +357,53 @@ p.RequiredParams(&sdkv1.Settings{
 
 ---
 
-## Skill 12 — React when a process ends (signals, optional)
+## Skill 12 — Stop a job with its flow (optional)
 
-The runtime broadcasts on `inflow.plugin.<PLUGIN_ID>.proc` every time a plugin
-node process ends — with the `jobId` and a conclusion (`done`, `flow_stop_by_user`,
-`timeout`, …). `p.OnSignal` subscribes to that port; call it **before `Start()`**.
+**Skip this skill unless you need it.** A stopped or timed-out process does *not*
+stop the job you accepted, by design: the next run of that node may build on the
+progress this one made — the runtime hands the previous `jobId` back in
+`_registry`. Reach for this only when the work itself must die with the process:
+an open stream, a paid upstream call, a held lock.
+
+Then declare the action's handler cancelable. It receives the job's lifetime as
+`ctx`, which the SDK cancels when the flow is stopped, times out, or goes idle:
+
+```go
+p.AddAction(sdkv1.Action{
+    Method:         "long.export",
+    RequestHandler: sdkv1.NewCancelableJobHandler(func(ctx context.Context, job sdkv1.Job) {
+        // ... work that honours ctx ...
+        if ctx.Err() != nil {
+            return // stopped: the runtime is gone, do not Done
+        }
+        job.Done(map[string]any{"ok": true}) // ends the process and releases the job
+    }),
+})
+```
+
+No `OnSignal` and no bookkeeping: the SDK routes each stop to its job, and the
+job cleans up on its own — on `Done` / `DoneWithError…`, on a stop, or when the
+handler returns. An action with a plain handler keeps running after a stop, as
+before.
+
+Gotchas:
+
+- Cancellation is **per `jobId`**. One subject carries every signal of the
+  plugin, so a process hears the endings of other flows' jobs (and other
+  replicas'); those find nothing filed and do nothing.
+- Once `ctx` is cancelled the runtime has stopped listening to that job:
+  `Progress`/`Done` will find no responder. Check `ctx.Err()` and return.
+
+To merely *watch* how processes end, `p.OnSignal` subscribes a handler of your
+own to the port (before `Start()`; it runs on its own goroutine, and only the
+last one registered is kept). Signals arrive on **success too** — filter on
+`sig.Conclusion`:
 
 ```go
 p.OnSignal(func(sig sdkv1.Signal) {
     log.Printf("job %s ended: %s", sig.JobId, sig.Conclusion)
 })
 ```
-
-**Skip this skill unless you need it.** A stopped or timed-out process does *not*
-stop the job you accepted, by design: the next run of that node may build on the
-progress this one made — the runtime hands the previous `jobId` back in
-`_registry`. Only reach for `OnSignal` when the work itself must die with the
-process: an open stream, a paid upstream call, a held lock.
-
-The working pattern is to file the cancel under the `jobId` and let the signal
-find it:
-
-```go
-var inflight sync.Map // jobId -> context.CancelFunc
-
-p.OnSignal(func(sig sdkv1.Signal) {
-    if !sig.Conclusion.Canceled() { // done / next / failed: nothing to abort
-        return
-    }
-    if cancel, ok := inflight.LoadAndDelete(sig.JobId); ok {
-        cancel.(context.CancelFunc)()
-    }
-})
-
-p.AddAction(sdkv1.Action{Method: "long.export", RequestHandler: func(job sdkv1.Job) {
-    ctx, cancel := context.WithCancel(context.Background())
-    inflight.Store(job.JobId, cancel)
-    defer func() { cancel(); inflight.Delete(job.JobId) }()
-
-    // ... work that honours ctx ...
-    job.Done(map[string]any{"ok": true})
-}})
-```
-
-Gotchas:
-
-- Signals arrive on **success too** — always filter on `sig.Conclusion`
-  (`Canceled()` / `Succeeded()`).
-- When the signal lands the runtime has already stopped listening to that job, so
-  an abandoned handler's `Progress`/`Done` will find no responder. Wind down
-  quietly.
-- Handlers run on their own goroutine; only the last one registered is kept.
 
 Full treatment: [docs/jobs-and-commands.md § Signals](docs/jobs-and-commands.md#signals--when-the-runtime-ends-a-process).
 
@@ -475,7 +471,7 @@ p.AddAction(sdkv1.Action{Method: "fn", RequestHandler: func(job sdkv1.Job) {
 Because the plugin is a persistent process, an action can kick off background work,
 or the plugin can hold connections and run loops between requests. Keep any shared
 state on your own types and guard it; each `RequestHandler` runs per invocation.
-This is the plugin shape most likely to want [Skill 12](#skill-12--react-when-a-process-ends-signals-optional):
+This is the plugin shape most likely to want [Skill 12](#skill-12--stop-a-job-with-its-flow-optional):
 background work that should be torn down when the process that started it is
 stopped.
 

@@ -72,11 +72,12 @@ Because the plugin is a persistent process rather than a compiled node, it can:
    node can perform, each with its own form and `RequestHandler`.
 5. **Listen for signals (optional).** `p.OnSignal(handler)` registers a handler
    for the runtime's one-way signal port — told when a process the plugin ran has
-   ended, and how. Skip it unless the plugin holds work that must stop with the
-   process; see [jobs-and-commands.md § Signals](jobs-and-commands.md#signals--when-the-runtime-ends-a-process).
+   ended, and how. Work that must stop with the process does not need it: declare
+   that action's handler with `sdkv1.NewCancelableJobHandler` and the SDK routes
+   the stop to it; see [jobs-and-commands.md § Signals](jobs-and-commands.md#signals--when-the-runtime-ends-a-process).
 6. **Start.** `p.Start()` subscribes to every subject: intro, settings, the action
-   list, each action's form, each action's executor, and the signal port if a
-   handler was registered. It returns immediately.
+   list, each action's form, each action's executor, and the signal port (which
+   the SDK listens to itself, for cancelable handlers). It returns immediately.
 7. **Block & serve.** `select {}` keeps the process alive. From here on it is
    request-driven: the runtime asks for metadata (intro/forms/actions) and
    dispatches executions.

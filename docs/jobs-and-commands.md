@@ -358,53 +358,93 @@ again in the next execution's request), so a half-built export, an open import
 cursor or a warmed cache is an asset, not garbage. Dropping it on every
 cancellation would throw that away.
 
-So the SDK does nothing about `proc` signals unless you ask. A plugin that never
-calls `OnSignal` behaves exactly as it always has — **nothing breaks by ignoring
-this**. Register a handler only for work that genuinely must not outlive the
-process: a stream to close, an upstream request to abort, a lock or reservation
-to release, a spend to stop.
+So a job does not stop with its flow unless its action says so. A plugin that
+declares plain handlers behaves exactly as it always has — **nothing breaks by
+ignoring this**. Declare a handler cancelable only for work that genuinely must
+not outlive the process: a stream to close, an upstream request to abort, a lock
+or reservation to release, a spend to stop.
 
-The pattern is to file cancellable work under its `jobId` and let the signal find
-it:
+### Stopping a job with its flow — `NewCancelableJobHandler`
+
+Wrap the action's handler. It is then handed the job's lifetime as `ctx`, and the
+SDK cancels that `ctx` when the runtime concludes the job's process as
+`Canceled()`:
 
 ```go
-var inflight sync.Map // jobId -> context.CancelFunc
-
-p.OnSignal(func(sig sdkv1.Signal) {
-    if !sig.Conclusion.Canceled() {
-        return // done / next / failed — nothing to abort
-    }
-    if cancel, ok := inflight.LoadAndDelete(sig.JobId); ok {
-        cancel.(context.CancelFunc)()
-    }
+p.AddAction(sdkv1.Action{
+    Method:         "long.export",
+    RequestHandler: sdkv1.NewCancelableJobHandler(exportHandler),
 })
 
-p.AddAction(sdkv1.Action{Method: "long.export", RequestHandler: func(job sdkv1.Job) {
-    ctx, cancel := context.WithCancel(context.Background())
-    inflight.Store(job.JobId, cancel)
-    defer func() { cancel(); inflight.Delete(job.JobId) }()
-
+func exportHandler(ctx context.Context, job sdkv1.Job) {
     if err := exportWithContext(ctx, job); err != nil {
+        if ctx.Err() != nil {
+            return // stopped by the runtime: nobody is listening, do not Done
+        }
         job.DoneWithError(err.Error())
         return
     }
-    job.Done(map[string]any{"ok": true})
-}})
+    job.Done(map[string]any{"ok": true}) // ends the process, releases the job
+}
 ```
 
-Two things to keep in mind while writing one:
+That is all of it — no `OnSignal`, no map of cancel funcs. The SDK listens to the
+signal port itself and routes each stop to the job it names, *before* any
+`OnSignal` handler of yours runs, so the two never compete for the port. Pass
+`ctx` to whatever must die with the process — a model call, an
+`http.NewRequestWithContext`, an MCP session — and those abort in flight.
 
-- **Signals arrive for every ending, including `done`.** Filter on
-  `Conclusion` — a handler that cancels unconditionally will cancel successful
-  jobs too (harmlessly here, because the job is finished, but it is the wrong
-  habit).
-- **The runtime is already gone.** By the time the signal lands, that job's
-  command subjects have no responder: a `Progress` or `Done` from the abandoned
-  handler will retry and fail. Wind the work down; do not try to report it.
+The opt-in is per action, not per plugin: one plugin can hold an abortable
+`call_tool` beside a long job, declared with a plain handler, that must outlive
+the flow that started it.
 
-Handlers run on their own goroutine (so a slow one does not stall the port) and a
-panic inside one is recovered and logged. Only the last registered handler is
-kept.
+**The job cleans up after itself.** `ctx` ends, and the job leaves the plugin's
+registry, on the first of:
+
+- its **terminal command** — `Done`, `DoneWithError`, `DoneWithErrorData`,
+  `DoneWithErrorCode` (or a `Progress` above 99) release the job right after the
+  command is sent. This is the ordinary ending, a job that was never stopped,
+  and it needs nothing from you. It holds for a copy of the job too, so a helper
+  that takes the job by value and calls `Done` releases it as well;
+- a **stop signal** for the job;
+- the **handler returning**, however it does — a return after a cancellation, a
+  path that forgot to `Done`, a panic.
+
+A `proc` signal for any other ending (failure, internal_error, …) unfiles the job
+without cancelling it, so a handler that hung before reaching `Done` leaves
+nothing behind. `next_tags` routes and does not end anything, so it does not
+release. Once the terminal command is out, `ctx` is done: work still holding it
+stops with the process.
+
+**Isolation is by `jobId`, and it has to be.** The runtime publishes every
+process signal of a plugin on one subject, `inflow.plugin.<PLUGIN_ID>.proc`, so
+every process of that plugin hears all of them: the endings of jobs in other
+flows running at the same time, and — when the plugin runs as several replicas —
+of jobs this process never accepted. The payload carries no flowId; the `jobId`
+is the only discriminator on the wire. A stop for a job this process does not
+hold finds nothing and does nothing. Never treat a signal as "stop the current
+work".
+
+Two things to keep in mind:
+
+- **The runtime is already gone.** By the time `ctx` is cancelled, that job's
+  command subjects have no responder: a `Progress` or `Done` from the stopped
+  handler retries and fails, slowly. Check `ctx.Err()` and return.
+- **One instant is not covered.** The job is filed when its handler starts, just
+  after the SDK has acknowledged it; a stop landing in between finds nothing
+  filed, and that one job runs to its end.
+
+### Watching the port — `OnSignal`
+
+`OnSignal` is for observing how processes end, or for a reaction a job's own
+`ctx` cannot express. Signals arrive for **every ending, including `done`**, so
+filter on `sig.Conclusion` — a handler that acts unconditionally acts on
+successful jobs too.
+
+`OnSignal` handlers run on their own goroutine (so a slow one does not stall the
+port) and a panic inside one is recovered and logged. Only the last registered
+handler is kept — which never displaces the SDK's own routing of stops to
+cancelable jobs.
 
 ## Command reference
 

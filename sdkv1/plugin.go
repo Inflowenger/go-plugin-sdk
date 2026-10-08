@@ -41,6 +41,9 @@ type Plugin struct {
 	metaFn      []Meta
 	signalFn    SignalHandler
 	sendTimeout time.Duration
+	// cancels files every job running under NewCancelableJobHandler, so the
+	// signal port can stop the one a stop signal names. See jobCancels.
+	cancels jobCancels
 }
 
 func NewPlugin(opts ...func(*Plugin) error) (*Plugin, error) {
@@ -94,6 +97,12 @@ func (p *Plugin) GetPluginId()string{
 	return p.PluginId
 }
 
+// jobRegistry makes Plugin a jobTracker: the registry NewCancelableJobHandler
+// files its jobs with.
+func (p *Plugin) jobRegistry() *jobCancels {
+	return &p.cancels
+}
+
 // OnSignal registers the handler for the plugin's signal port — every subject
 // under `inflow.plugin.<PLUGIN_ID>.>`, the runtime's one-way broadcast channel
 // about processes this plugin is running (see Signal). Call it before Start,
@@ -104,10 +113,13 @@ func (p *Plugin) GetPluginId()string{
 // before, and that is the norm: when a process is stopped or times out, the
 // job the plugin took on deliberately keeps running, because a later process
 // may pick up where it left off — the runtime hands the previous jobId back in
-// `_registry`, so progress made after the stop is not wasted. Register a
-// handler only for the cases where the work itself must also stop: a stream to
-// close, an upstream call to abort, a reservation to release. Then test
-// sig.Conclusion.Canceled() and cancel the work you filed under sig.JobId.
+// `_registry`, so progress made after the stop is not wasted.
+//
+// It is not how a job is made to stop with its flow, either: declare that
+// action's handler with NewCancelableJobHandler, and the SDK routes the stop to
+// it — before this handler runs, so the two never compete for the port. Reach
+// for OnSignal to observe how processes end, or for a reaction the job's own
+// context cannot express.
 //
 // Only the last registered handler is kept. Handlers run on their own
 // goroutine, so signals for different jobs may overlap, and a panic inside one

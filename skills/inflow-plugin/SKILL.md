@@ -154,21 +154,26 @@ registered via `inflow-fusion`, a different repo, and are out of scope here.
    Full contract: `docs/form-builder.md` and the catalog's `dependent-fields.md`
    (that doc still describes the pre-`x-inflow-notif` status-field workaround;
    the notification channel above supersedes it).
-6. **Only if in-flight work must stop with the process**, register a signal
-   handler before `Start()`:
+6. **Only if in-flight work must stop with the process**, declare that action's
+   handler cancelable:
    ```go
-   p.OnSignal(func(sig sdkv1.Signal) {   // inflow.plugin.<PLUGIN_ID>.>
-       if sig.Conclusion.Canceled() {    // flow_stop_by_user / stop_command / timeout / idle
-           cancelWorkFor(sig.JobId)      // sig.JobId == the Job.JobId you were given
-       }
-   })
+   RequestHandler: sdkv1.NewCancelableJobHandler(func(ctx context.Context, job sdkv1.Job) {
+       // pass ctx down; on ctx.Err() != nil just return (do not Done)
+   }),
    ```
-   This is **optional and not the default**: a stopped process deliberately does
-   not stop the job, because a later run of the node may build on its progress
-   (the previous `jobId` comes back in `_registry`). Add it only for a stream to
-   close, an upstream call to abort, a lock to release. Signals also arrive on
-   success, so always filter on `sig.Conclusion`; and once one lands, the runtime
-   no longer answers that job's commands — do not try to `Done` an abandoned job.
+   `ctx` is cancelled when the flow is stopped / times out / goes idle. The SDK
+   routes the stop itself — no `OnSignal`, no `sync.Map` of cancel funcs; do not
+   hand-write one. The job cleans up on its own: `Done`/`DoneWithError…`, a stop,
+   or the handler returning all release it. Cancellation is per `jobId`: the
+   plugin's one signal subject carries every flow's (and every replica's)
+   endings, and a stop for a job this process does not hold is a no-op.
+   This is **optional and not the default**: a plain handler's job deliberately
+   keeps running after a stop, because a later run of the node may build on its
+   progress (the previous `jobId` comes back in `_registry`). Wrap only actions
+   with a stream to close, an upstream call to abort, a lock to release. Once
+   `ctx` is cancelled the runtime no longer answers that job's commands — do not
+   try to `Done` it. (`p.OnSignal` remains for *observing* how processes end;
+   signals arrive on success too, so filter on `sig.Conclusion`.)
 7. **Build & run**: `go build ./...`, then `go run .`; the SDK logs each subscribed
    subject on startup. Verify by adding the node to a flow and running it.
 

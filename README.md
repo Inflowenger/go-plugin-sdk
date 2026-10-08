@@ -191,14 +191,13 @@ p.AddAction(sdkv1.Action{
     Form:           sdkv1.FormBuilder{Jsonschema: schema, Jsonui: ui},
     RequestHandler: func(job sdkv1.Job) { /* the work */ },
 })
+//    (optional) An action whose work must stop when its flow is stopped declares
+//    a cancelable handler instead — ctx is cancelled on the stop:
+//    RequestHandler: sdkv1.NewCancelableJobHandler(func(ctx context.Context, job sdkv1.Job) { ... }),
 
-// 4. (optional) Listen to the runtime's signal port — told when a process this
-//    plugin ran has ended, and how. Only needed if in-flight work must stop too.
-p.OnSignal(func(sig sdkv1.Signal) {
-    if sig.Conclusion.Canceled() {
-        cancelWorkFor(sig.JobId)
-    }
-})
+// 4. (optional) Watch the runtime's signal port — told when a process this
+//    plugin ran has ended, and how.
+p.OnSignal(func(sig sdkv1.Signal) { /* observe */ })
 
 // 5. Start serving and block
 p.Start()
@@ -206,7 +205,7 @@ select {}
 ```
 
 `Start()` wires up all the NATS subscriptions (intro, settings, action list, per-action
-forms, per-action executors, and the signal port when a handler was registered) and returns. Because the SDK subscribes
+forms, per-action executors, and the signal port) and returns. Because the SDK subscribes
 asynchronously, your `main` must block afterwards (`select {}`) to keep the process
 alive.
 
