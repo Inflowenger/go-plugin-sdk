@@ -358,25 +358,106 @@ again in the next execution's request), so a half-built export, an open import
 cursor or a warmed cache is an asset, not garbage. Dropping it on every
 cancellation would throw that away.
 
-So a job does not stop with its flow unless its action says so. A plugin that
-declares plain handlers behaves exactly as it always has — **nothing breaks by
-ignoring this**. Declare a handler cancelable only for work that genuinely must
-not outlive the process: a stream to close, an upstream request to abort, a lock
-or reservation to release, a spend to stop.
+So the SDK does nothing about `proc` signals unless you ask. A plugin that never
+calls `OnSignal` behaves exactly as it always has — **nothing breaks by ignoring
+this**. Register a handler only for work that genuinely must not outlive the
+process: a stream to close, an upstream request to abort, a lock or reservation
+to release, a spend to stop.
 
-### Stopping a job with its flow — `NewCancelableJobHandler`
+The pattern is to file cancellable work under its `jobId` and let the signal find
+it — and to file it *before the runtime knows the jobId*, which is what
+middleware is for.
 
-Wrap the action's handler. It is then handed the job's lifetime as `ctx`, and the
-SDK cancels that `ctx` when the runtime concludes the job's process as
-`Canceled()`:
+### Middleware — functions run before the job is accepted
+
+Every action request runs a list of **middleware functions**, in order, before
+the job is accepted:
 
 ```go
+type MiddlewareFunc func(ctx context.Context, job sdkv1.Job) (context.Context, error)
+type Middlewares    []MiddlewareFunc
+```
+
+```
+request ─▶ JobID ─▶ plugin's (p.Use) ─▶ action's (Action.Middleware) ─▶ accept: reply jobId ─▶ handler
+```
+
+You list them with the `Use` helper — on one action, or for every action:
+
+```go
+p.Use(trace)                                   // every action
+p.AddAction(sdkv1.Action{
+    Method:     "run",
+    Middleware: sdkv1.Use(stops.Middleware, register), // this action, in this order
+    ...
+})
+```
+
+- **`sdkv1.JobID`** runs first: it binds a fresh jobId (a UUID) to the context —
+  `sdkv1.JobIDFromContext(ctx)` reads it — and the SDK sets `job.JobId` from it,
+  so every function after it sees the job named. It is a function like any
+  other: `sdkv1.WithJobID(fn)` replaces it for a plugin that names its jobs its
+  own way. A function later in the chain may rename the job too — the SDK keeps
+  `job.JobId` in step with the context after *every* function — which is how a
+  plugin runs a job under an id its upstream service minted: see
+  [external-job-identity.md](external-job-identity.md).
+- Each function gets the context the one before it returned, and returns it —
+  with whatever it bound — for the next; the last one's is the handler's
+  `job.Context()`. Returning a nil context keeps the one it was given.
+- Then the job is **accepted** — the jobId replied to the runtime — and the
+  handler runs.
+
+Because they run before the reply, the runtime does not know the jobId while
+they run: nothing can happen to the job — a stop, a query from a later run —
+before what a function set up under that jobId is in place.
+
+```go
+func register(ctx context.Context, job sdkv1.Job) (context.Context, error) {
+    runs.Store(job.JobId, &run{status: "running"}) // before the runtime knows the jobId
+    return ctx, nil
+}
+```
+
+- **An error rejects the request**: the runtime gets the error instead of a
+  jobId, and neither the functions after it nor the handler run. A panic is
+  recovered and rejected the same way.
+- **The job's context ends when the handler returns** (like an
+  `http.Request`'s), or when the request is rejected. A function that must clean
+  up when the job ends does it with `context.AfterFunc(ctx, cleanup)`.
+- The functions run on the job's own goroutine, so a slow one delays only its
+  own request's reply — but the runtime gives up on a jobId it waits too long
+  for, so keep them quick.
+
+The SDK adds no capability to a job on its own. Each one is a middleware function
+you list where it is needed — and, if it reacts to how processes end, a signal
+handler:
+
+| Capability | Middleware function | Signal port |
+|------------|---------------------|-------------|
+| Stop with the flow | `stops.Middleware` | `stops.OnSignal` |
+| A long-running job kept for a later run | yours, filing the jobId in your own map | yours, if it reacts to endings |
+| Tracing | yours: start a span, end it with `context.AfterFunc` | — |
+| [An external service's job id as the jobId](external-job-identity.md) | yours: register upstream, bind the id with `sdkv1.WithJobIDContext` | yours: abort upstream by `sig.JobId` |
+
+The port keeps one handler: `sdkv1.ChainSignals(h1, h2, …)` composes several
+into one.
+
+### Stopping a job with its flow — package `jobstop`
+
+`jobstop` is the stop capability, built from the two pieces above:
+
+```go
+var stops jobstop.Registry // one per plugin; the zero value is ready
+
+p.OnSignal(stops.OnSignal) // before Start() — without it, no stop ever arrives
 p.AddAction(sdkv1.Action{
     Method:         "long.export",
-    RequestHandler: sdkv1.NewCancelableJobHandler(exportHandler),
+    Middleware:     sdkv1.Use(stops.Middleware),
+    RequestHandler: exportHandler,
 })
 
-func exportHandler(ctx context.Context, job sdkv1.Job) {
+func exportHandler(job sdkv1.Job) {
+    ctx := job.Context()
     if err := exportWithContext(ctx, job); err != nil {
         if ctx.Err() != nil {
             return // stopped by the runtime: nobody is listening, do not Done
@@ -384,67 +465,67 @@ func exportHandler(ctx context.Context, job sdkv1.Job) {
         job.DoneWithError(err.Error())
         return
     }
-    job.Done(map[string]any{"ok": true}) // ends the process, releases the job
+    job.Done(map[string]any{"ok": true})
 }
 ```
 
-That is all of it — no `OnSignal`, no map of cancel funcs. The SDK listens to the
-signal port itself and routes each stop to the job it names, *before* any
-`OnSignal` handler of yours runs, so the two never compete for the port. Pass
-`ctx` to whatever must die with the process — a model call, an
-`http.NewRequestWithContext`, an MCP session — and those abort in flight.
-
-The opt-in is per action, not per plugin: one plugin can hold an abortable
-`call_tool` beside a long job, declared with a plain handler, that must outlive
-the flow that started it.
-
-**The job cleans up after itself.** `ctx` ends, and the job leaves the plugin's
-registry, on the first of:
-
-- its **terminal command** — `Done`, `DoneWithError`, `DoneWithErrorData`,
-  `DoneWithErrorCode` (or a `Progress` above 99) release the job right after the
-  command is sent. This is the ordinary ending, a job that was never stopped,
-  and it needs nothing from you. It holds for a copy of the job too, so a helper
-  that takes the job by value and calls `Done` releases it as well;
-- a **stop signal** for the job;
-- the **handler returning**, however it does — a return after a cancellation, a
-  path that forgot to `Done`, a panic.
-
-A `proc` signal for any other ending (failure, internal_error, …) unfiles the job
-without cancelling it, so a handler that hung before reaching `Done` leaves
-nothing behind. `next_tags` routes and does not end anything, so it does not
-release. Once the terminal command is out, `ctx` is done: work still holding it
-stops with the process.
+`stops.Middleware` files the job under its jobId before it is accepted, and
+unfiles it when its context ends; `stops.OnSignal` cancels it when the runtime
+concludes its process as `Canceled()` (cause `jobstop.ErrStopped`) and unfiles
+it on any other ending. `stops.CancelAll()` cancels every job it holds (cause
+`jobstop.ErrShutdown`), for a plugin about to exit; it sends nothing to the
+runtime. Without `p.OnSignal(stops.OnSignal)` the signal port is not
+subscribed — `Start` logs `Signals not subscribed on …` — and no stop arrives.
 
 **Isolation is by `jobId`, and it has to be.** The runtime publishes every
 process signal of a plugin on one subject, `inflow.plugin.<PLUGIN_ID>.proc`, so
 every process of that plugin hears all of them: the endings of jobs in other
 flows running at the same time, and — when the plugin runs as several replicas —
 of jobs this process never accepted. The payload carries no flowId; the `jobId`
-is the only discriminator on the wire. A stop for a job this process does not
-hold finds nothing and does nothing. Never treat a signal as "stop the current
-work".
+is the only discriminator on the wire. A stop for a job the registry does not
+hold does nothing.
 
 Two things to keep in mind:
 
-- **The runtime is already gone.** By the time `ctx` is cancelled, that job's
+- **Signals arrive for every ending, including `done`.** `stops.OnSignal`
+  cancels on `Canceled()` only; a hand-written handler should filter on
+  `Conclusion` the same way.
+- **The runtime is already gone.** By the time a stop cancels `ctx`, that job's
   command subjects have no responder: a `Progress` or `Done` from the stopped
-  handler retries and fails, slowly. Check `ctx.Err()` and return.
-- **One instant is not covered.** The job is filed when its handler starts, just
-  after the SDK has acknowledged it; a stop landing in between finds nothing
-  filed, and that one job runs to its end.
+  handler retries and fails, slowly. Check `ctx.Err()` and return — not the
+  error a library returned, which may not say it was cancelled.
 
-### Watching the port — `OnSignal`
+Handlers run on their own goroutine (so a slow one does not stall the port) and a
+panic inside one is recovered and logged. Only the last registered handler is
+kept.
 
-`OnSignal` is for observing how processes end, or for a reaction a job's own
-`ctx` cannot express. Signals arrive for **every ending, including `done`**, so
-filter on `sig.Conclusion` — a handler that acts unconditionally acts on
-successful jobs too.
+### Beyond stopping: work that outlives the process
 
-`OnSignal` handlers run on their own goroutine (so a slow one does not stall the
-port) and a panic inside one is recovered and logged. Only the last registered
-handler is kept — which never displaces the SDK's own routing of stops to
-cancelable jobs.
+Two patterns build on the pieces above, and both start from the same place — a
+middleware function that decides what the job *is* before the runtime is told:
+
+#### One id across two systems
+
+The pieces above compose into something larger than cancellation. A plugin that
+fronts a service with its own job ids — a Joern server, a render farm — can
+**adopt that id as the jobId** in a middleware function, so the runtime, the
+plugin and the service all name the work the same way: no correlation map, a
+stop that any replica can forward upstream, and a re-run that reattaches to the
+previous run's upstream work through `_registry`. That pattern, its invariants
+and its failure modes are
+[external-job-identity.md](external-job-identity.md).
+
+#### The flow as an observer
+
+Work measured in hours fits in no job: the runtime waits 15s for a `jobId`,
+gives up on a job that goes quiet for the node's `idle_min`, and ends the run at
+`ExecuteTimeOut`. So a plugin can decline to wait — report *where the work has
+got to*, route a "not yet" port with `CmdNextFilter`, and `Done` in seconds. The
+flow's process finishes, the external work does not, and a later run of the same
+node reads `_registry["jobId"]`, finds the work still running and reports again
+— until the run that finds it finished commits the result and routes the ready
+branch. Asynchrony stays inside the plugin, where the knowledge is; the graph
+needs no node type for it. See [detached-work.md](detached-work.md).
 
 ## Command reference
 

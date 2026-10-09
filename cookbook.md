@@ -7,7 +7,8 @@ minimal code that does it. Everything here is grounded in the SDK's real API.
 If you want the concepts behind these recipes, read the docs first:
 [architecture](docs/architecture.md) · [inflowv1 protocol](docs/protocol-inflowv1.md)
 · [jobs & commands](docs/jobs-and-commands.md) · [form builder](docs/form-builder.md)
-· [examples](docs/examples.md).
+· [external job identity](docs/external-job-identity.md) ·
+[detached work](docs/detached-work.md) · [examples](docs/examples.md).
 
 Also worth keeping open: the **[plugin catalog](https://github.com/Inflowenger/plugin-catalog)** — the developer
 knowledge base ([concepts](https://github.com/Inflowenger/plugin-catalog/blob/main/docs/concepts.md) ·
@@ -357,47 +358,11 @@ p.RequiredParams(&sdkv1.Settings{
 
 ---
 
-## Skill 12 — Stop a job with its flow (optional)
+## Skill 12 — React when a process ends (signals, optional)
 
-**Skip this skill unless you need it.** A stopped or timed-out process does *not*
-stop the job you accepted, by design: the next run of that node may build on the
-progress this one made — the runtime hands the previous `jobId` back in
-`_registry`. Reach for this only when the work itself must die with the process:
-an open stream, a paid upstream call, a held lock.
-
-Then declare the action's handler cancelable. It receives the job's lifetime as
-`ctx`, which the SDK cancels when the flow is stopped, times out, or goes idle:
-
-```go
-p.AddAction(sdkv1.Action{
-    Method:         "long.export",
-    RequestHandler: sdkv1.NewCancelableJobHandler(func(ctx context.Context, job sdkv1.Job) {
-        // ... work that honours ctx ...
-        if ctx.Err() != nil {
-            return // stopped: the runtime is gone, do not Done
-        }
-        job.Done(map[string]any{"ok": true}) // ends the process and releases the job
-    }),
-})
-```
-
-No `OnSignal` and no bookkeeping: the SDK routes each stop to its job, and the
-job cleans up on its own — on `Done` / `DoneWithError…`, on a stop, or when the
-handler returns. An action with a plain handler keeps running after a stop, as
-before.
-
-Gotchas:
-
-- Cancellation is **per `jobId`**. One subject carries every signal of the
-  plugin, so a process hears the endings of other flows' jobs (and other
-  replicas'); those find nothing filed and do nothing.
-- Once `ctx` is cancelled the runtime has stopped listening to that job:
-  `Progress`/`Done` will find no responder. Check `ctx.Err()` and return.
-
-To merely *watch* how processes end, `p.OnSignal` subscribes a handler of your
-own to the port (before `Start()`; it runs on its own goroutine, and only the
-last one registered is kept). Signals arrive on **success too** — filter on
-`sig.Conclusion`:
+The runtime broadcasts on `inflow.plugin.<PLUGIN_ID>.proc` every time a plugin
+node process ends — with the `jobId` and a conclusion (`done`, `flow_stop_by_user`,
+`timeout`, …). `p.OnSignal` subscribes to that port; call it **before `Start()`**.
 
 ```go
 p.OnSignal(func(sig sdkv1.Signal) {
@@ -405,7 +370,214 @@ p.OnSignal(func(sig sdkv1.Signal) {
 })
 ```
 
+**Skip this skill unless you need it.** A stopped or timed-out process does *not*
+stop the job you accepted, by design: the next run of that node may build on the
+progress this one made — the runtime hands the previous `jobId` back in
+`_registry`. Only reach for `OnSignal` when the work itself must die with the
+process: an open stream, a paid upstream call, a held lock.
+
+The working pattern is to file the cancel under the `jobId` and let the signal
+find it. Package `jobstop` is that, as a capability you add to the actions that
+need it — a middleware on the action, a signal handler on the port:
+
+```go
+var stops jobstop.Registry       // one per plugin; zero value is ready
+p.OnSignal(stops.OnSignal)       // before Start()
+
+p.AddAction(sdkv1.Action{
+    Method: "long.export",
+    Middleware: sdkv1.Use(stops.Middleware), // only on actions that should stop with the flow
+    RequestHandler: func(job sdkv1.Job) {
+        ctx := job.Context()     // cancelled when the flow is stopped
+        // ... work that honours ctx ...
+        if ctx.Err() != nil {
+            return // stopped: the runtime is gone, do not Done
+        }
+        job.Done(map[string]any{"ok": true})
+    },
+})
+```
+
+Middleware runs before the runtime is told the jobId, so a stop can never arrive
+for a job not yet filed. A middleware is a plain function —
+`func(ctx context.Context, job sdkv1.Job) (context.Context, error)` — so your own
+capabilities (a long-running job kept in your map, a trace) are middleware too,
+listed in order: `sdkv1.Use(trace, stops.Middleware)` on an action,
+`p.Use(trace)` on every action, `sdkv1.ChainSignals(stops.OnSignal, yours)` on
+the port. An error from one rejects the request.
+
+Gotchas:
+
+- Cancellation is **per `jobId`**. One subject carries every signal of the
+  plugin, so a process hears the endings of other flows' jobs (and other
+  replicas'); those find nothing filed and do nothing.
+- Signals arrive on **success too** — `stops.OnSignal` filters on
+  `sig.Conclusion.Canceled()`; a handler of your own should too.
+- When a stop lands the runtime has already stopped listening to that job, so a
+  stopped handler's `Progress`/`Done` will find no responder. Wind down quietly.
+- Handlers run on their own goroutine; only the last one registered is kept —
+  compose several with `sdkv1.ChainSignals`.
+
 Full treatment: [docs/jobs-and-commands.md § Signals](docs/jobs-and-commands.md#signals--when-the-runtime-ends-a-process).
+
+---
+
+## Skill 13 — Run the job under an external service's id (advanced)
+
+When your plugin is a **middleman** for a service that names work itself — Joern's
+HTTP server answering `POST /query` with `{"queryId":"q-8f21"}`, a render farm, a
+scan — do not keep a `map[pluginJobId]upstreamId`. Register the work in a
+middleware function and bind what came back as the job's id: middleware runs
+**before** the job is accepted, so the id you bind is the id the runtime is told.
+
+```go
+func registerQuery(ctx context.Context, job sdkv1.Job) (context.Context, error) {
+    in, err := sdkv1.CastRequestTo[QueryInput](job.Req.Data)
+    if err != nil {
+        return nil, err // rejects the request: the node never ran
+    }
+    // Re-running? The previous jobId IS the upstream id — reattach, don't duplicate.
+    if prev, ok := in.Registry["jobId"].(string); ok && joern.Alive(ctx, prev) {
+        return sdkv1.WithJobIDContext(ctx, prev), nil
+    }
+    queryId, err := joern.Register(ctx, in.Body.Project, in.Body.Query)
+    if err != nil {
+        return nil, err // nothing was enlisted upstream: nothing to undo
+    }
+    return sdkv1.WithJobIDContext(ctx, queryId), nil
+}
+
+p.OnSignal(sdkv1.ChainSignals(stops.OnSignal, abortUpstream))
+p.AddAction(sdkv1.Action{
+    Method:         "cpg.query",
+    Middleware:     sdkv1.Use(registerQuery, stops.Middleware), // namer FIRST
+    RequestHandler: queryHandler,
+})
+```
+
+From then on one name serves both systems: `job.JobId`, every command subject
+(`inflow.cpu.<id>.q-8f21.progress`), the stop signal's `jobId`, and the next
+run's `_registry["jobId"]`. Cancellation needs no local lookup at all —
+
+```go
+func abortUpstream(sig sdkv1.Signal) {
+    if sig.Kind != sdkv1.RuntimeProcessSignal || !sig.Conclusion.Canceled() {
+        return
+    }
+    joern.Cancel(context.Background(), sig.JobId) // sig.JobId IS the queryId
+}
+```
+
+— so any replica that hears the stop can abort the query, which a process-local
+map could never do.
+
+Gotchas:
+
+- **Name the job first.** `stops.Middleware` (and anything else keyed on the
+  jobId) files under `job.JobId` *as of when it runs*; placed before the namer it
+  files a uuid nothing will look up, and the stop is lost.
+- **Validate the id you adopt.** It must be **at least 10 characters** —
+  fractal-core refuses a shorter `jobId` with `init failed. invalid job ID` — a
+  usable NATS subject token (no `.`, space, `*`, `>`, since the command subjects
+  are built from it), and unique plugin-wide (prefix per-project counters).
+- **Register fast.** The runtime is waiting for the jobId while middleware runs —
+  one timeout-bounded call, never the work itself.
+- **Reject vs fail**: a middleware error means the node never ran (the runtime
+  gets the error, not a failed job). When the flow should *see* a failed node,
+  accept and use `job.DoneWithError`.
+- If the service accepts a **client-supplied** id instead, do the mirror image:
+  keep the SDK's uuid and send `job.JobId` upstream.
+
+Full treatment, with the distributed-transaction model and the failure modes:
+[docs/external-job-identity.md](docs/external-job-identity.md).
+
+---
+
+## Skill 14 — Report and observe instead of waiting (advanced)
+
+Work that takes hours does not fit in a job. Three budgets say so: the runtime
+waits **15s** for your `jobId`, gives up on a job that sends no command for the
+node's `idle_min`, and ends the run at `ExecuteTimeOut`. So do not wait — **report
+where the work has got to, route a "not yet" port, and end the job in seconds.**
+The flow's process finishes; the external work doesn't; a later run of the same
+node picks it up through `_registry`.
+
+```go
+// Accept stage. Only two inputs exist here: body, and _registry — the node's
+// memory of its own previous run (job commands need a jobId, which this decides).
+func attachOrStart(ctx context.Context, job sdkv1.Job) (context.Context, error) {
+    in, err := sdkv1.CastRequestTo[QueryInput](job.Req.Data)
+    if err != nil {
+        return nil, err
+    }
+    if prev, ok := in.Registry["jobId"].(string); ok && prev != "" && joern.Has(ctx, prev) {
+        return sdkv1.WithJobIDContext(ctx, prev), nil // observe what the last run started
+    }
+    queryId, err := joern.Register(ctx, in.Body.Project, in.Body.Query) // start new work
+    if err != nil {
+        return nil, err
+    }
+    return sdkv1.WithJobIDContext(ctx, queryId), nil
+}
+
+func observe(job sdkv1.Job) {
+    status, err := joern.Poll(job.Context(), job.JobId) // job.JobId IS the upstream id
+    switch {
+    case err != nil:
+        job.DoneWithError(err.Error())
+    case status.Failed:
+        job.CmdNextFilter([]string{"_exception"}) // fail AND route
+        job.DoneWithErrorData(status.Error, map[string]any{"queryId": job.JobId}, "joern")
+    case !status.Done:
+        job.CmdNextFilter([]string{"pending"})    // a SUCCESSFUL "not yet"
+        job.Done(map[string]any{"state": "running", "percent": status.Percent}, "joern")
+    default:
+        joern.Release(context.WithoutCancel(job.Context()), job.JobId)
+        job.CmdNextFilter([]string{"ready"})
+        job.Done(map[string]any{"state": "done", "result": status.Result}, "joern")
+    }
+}
+```
+
+Declare the ports so the canvas shows them before anything runs:
+
+```go
+Outbound: []sdkv1.OutboundPort{
+    {Title: "Still running", Tags: []string{"pending"}},
+    {Title: "Result ready",  Tags: []string{"ready"}},
+    {Title: "Query failed",  Tags: []string{"_exception"}},
+},
+```
+
+Then the flow closes the loop: the `pending` branch ends in a delay/Continue
+After node, a schedule re-runs it, or a loop edge returns to the node — all of
+which must re-enter **over the same context document**, because `_registry` is
+the node's entry in that document.
+
+Gotchas:
+
+- **"Still running" is `Done`, not an error.** The job did look; the answer is
+  "not yet". `DoneWithError` there would route the flow's error branch for a
+  perfectly healthy query.
+- **Commit, don't just report.** `job.Done(data, "joern")` commits at that key —
+  a bare `Done` with no key commits nothing, so the next run (and the next node)
+  sees an empty scope.
+- **`_registry` is per call site and lives in the context document.** Two `GoTo`s
+  onto the same sub-flow keep separate memories; a run over a *new* context
+  starts fresh and will correctly start new upstream work.
+- **`doneAt` / `conclusion` describe the run, not the work.** A "pending" run
+  ends `done`. Only the service knows the work's state. `reqAt` is the useful
+  one — it dates the handle, so you can give up on a stale one.
+- **No `stops.Middleware` on an observer action.** Outliving the flow is the
+  point; a stop should not abort the upstream work unless an abandoned job
+  genuinely costs you (then abort it from the signal handler by `sig.JobId`).
+- **Handle the stale handle.** If the service has forgotten the id, start fresh
+  rather than reporting `pending` forever.
+- **Give the loop a floor** — an attempt counter in a contract, or a `reqAt` age
+  limit in the plugin.
+
+Full treatment, with the three budgets, the registry fields and the limits:
+[docs/detached-work.md](docs/detached-work.md).
 
 ---
 
@@ -471,7 +643,7 @@ p.AddAction(sdkv1.Action{Method: "fn", RequestHandler: func(job sdkv1.Job) {
 Because the plugin is a persistent process, an action can kick off background work,
 or the plugin can hold connections and run loops between requests. Keep any shared
 state on your own types and guard it; each `RequestHandler` runs per invocation.
-This is the plugin shape most likely to want [Skill 12](#skill-12--stop-a-job-with-its-flow-optional):
+This is the plugin shape most likely to want [Skill 12](#skill-12--react-when-a-process-ends-signals-optional):
 background work that should be torn down when the process that started it is
 stopped.
 

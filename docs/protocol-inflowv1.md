@@ -97,8 +97,7 @@ cancellation callback:
 The SDK subscribes to the whole port with a wildcard
 (`inflow.plugin.<PLUGIN_ID>.>`) so a future signal kind reaches the same handler.
 See [jobs-and-commands.md § Signals](jobs-and-commands.md#signals--when-the-runtime-ends-a-process)
-for the SDK side: `sdkv1.NewCancelableJobHandler`, which stops a job on a stop
-signal for its `jobId`, and `Plugin.OnSignal`, which observes the port.
+for the SDK side, `Plugin.OnSignal`.
 
 ## The request → job handshake
 

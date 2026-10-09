@@ -41,9 +41,12 @@ type Plugin struct {
 	metaFn      []Meta
 	signalFn    SignalHandler
 	sendTimeout time.Duration
-	// cancels files every job running under NewCancelableJobHandler, so the
-	// signal port can stop the one a stop signal names. See jobCancels.
-	cancels jobCancels
+	// jobID is the middleware function every request runs first, naming the
+	// job; nil means JobID. See WithJobID.
+	jobID MiddlewareFunc
+	// middlewares run on every action's requests, after jobID and before the
+	// action's own. See Use.
+	middlewares Middlewares
 }
 
 func NewPlugin(opts ...func(*Plugin) error) (*Plugin, error) {
@@ -97,10 +100,21 @@ func (p *Plugin) GetPluginId()string{
 	return p.PluginId
 }
 
-// jobRegistry makes Plugin a jobTracker: the registry NewCancelableJobHandler
-// files its jobs with.
-func (p *Plugin) jobRegistry() *jobCancels {
-	return &p.cancels
+// Use adds middleware functions that run on the requests of every action, in
+// the order given — after JobID, before each action's own Action.Middleware.
+// Call it before Start.
+func (p *Plugin) Use(fns ...MiddlewareFunc) {
+	p.middlewares = p.middlewares.Append(fns...)
+}
+
+// pipeline is the middleware a request of action runs, in order: the job's
+// namer, the plugin's, then the action's own.
+func (p *Plugin) pipeline(action Action) Middlewares {
+	namer := p.jobID
+	if namer == nil {
+		namer = JobID
+	}
+	return Use(namer).Append(p.middlewares...).Append(action.Middleware...)
 }
 
 // OnSignal registers the handler for the plugin's signal port — every subject
@@ -113,13 +127,10 @@ func (p *Plugin) jobRegistry() *jobCancels {
 // before, and that is the norm: when a process is stopped or times out, the
 // job the plugin took on deliberately keeps running, because a later process
 // may pick up where it left off — the runtime hands the previous jobId back in
-// `_registry`, so progress made after the stop is not wasted.
-//
-// It is not how a job is made to stop with its flow, either: declare that
-// action's handler with NewCancelableJobHandler, and the SDK routes the stop to
-// it — before this handler runs, so the two never compete for the port. Reach
-// for OnSignal to observe how processes end, or for a reaction the job's own
-// context cannot express.
+// `_registry`, so progress made after the stop is not wasted. Register a
+// handler only for the cases where the work itself must also stop: a stream to
+// close, an upstream call to abort, a reservation to release. Then test
+// sig.Conclusion.Canceled() and cancel the work you filed under sig.JobId.
 //
 // Only the last registered handler is kept. Handlers run on their own
 // goroutine, so signals for different jobs may overlap, and a panic inside one
@@ -231,6 +242,17 @@ func WithTimeout(seconds int) func(*Plugin) error {
 		if seconds > 0 {
 			p.sendTimeout = time.Duration(seconds) * time.Second
 		}
+		return nil
+	}
+}
+
+// WithJobID replaces JobID as the middleware function every request runs
+// first, for a plugin that names its jobs its own way. It must bind the id with
+// WithJobIDContext — the SDK takes Job.JobId from there — since everything
+// after it keys on the jobId; a request it leaves unnamed is rejected.
+func WithJobID(namer MiddlewareFunc) func(*Plugin) error {
+	return func(p *Plugin) error {
+		p.jobID = namer
 		return nil
 	}
 }

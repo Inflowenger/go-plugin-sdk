@@ -28,6 +28,11 @@ type Action struct {
 	Title          string         `json:"title"`
 	Icon           Icon           `json:"icon"`
 	RequestHandler JobHandler     `json:"-"`
+	// Middleware is the action's own middleware functions, run in order after
+	// the plugin's (Plugin.Use) and before the job is accepted — build it with
+	// sdkv1.Use(fn, ...); see MiddlewareFunc. Optional. Excluded from JSON like
+	// every handler here — @actions marshals this struct.
+	Middleware     Middlewares    `json:"-"`
 	Form           FormBuilder    `json:"form"`
 	Outbound       []OutboundPort `json:"outbound,omitempty"`
 	// Tags is an open bag of string labels for grouping and classifying an

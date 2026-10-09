@@ -191,12 +191,12 @@ p.AddAction(sdkv1.Action{
     Form:           sdkv1.FormBuilder{Jsonschema: schema, Jsonui: ui},
     RequestHandler: func(job sdkv1.Job) { /* the work */ },
 })
-//    (optional) An action whose work must stop when its flow is stopped declares
-//    a cancelable handler instead — ctx is cancelled on the stop:
-//    RequestHandler: sdkv1.NewCancelableJobHandler(func(ctx context.Context, job sdkv1.Job) { ... }),
 
-// 4. (optional) Watch the runtime's signal port — told when a process this
-//    plugin ran has ended, and how.
+// 4. (optional) Listen to the runtime's signal port — told when a process this
+//    plugin ran has ended, and how. To stop an action's work with its flow,
+//    add the jobstop capability: p.OnSignal(stops.OnSignal) here, and
+//    Middleware: sdkv1.Use(stops.Middleware) on that action
+//    (see docs/jobs-and-commands.md § Middleware).
 p.OnSignal(func(sig sdkv1.Signal) { /* observe */ })
 
 // 5. Start serving and block
@@ -205,7 +205,7 @@ select {}
 ```
 
 `Start()` wires up all the NATS subscriptions (intro, settings, action list, per-action
-forms, per-action executors, and the signal port) and returns. Because the SDK subscribes
+forms, per-action executors, and the signal port when a handler was registered) and returns. Because the SDK subscribes
 asynchronously, your `main` must block afterwards (`select {}`) to keep the process
 alive.
 
@@ -303,6 +303,8 @@ See [docs/jobs-and-commands.md § Signals](docs/jobs-and-commands.md#signals--wh
 | [docs/architecture.md](docs/architecture.md) | Where the plugin node sits in Inflowenger (Context / Workflows / Fractals / Adapters), and the plugin lifecycle. |
 | [docs/protocol-inflowv1.md](docs/protocol-inflowv1.md) | The `inflowv1` wire protocol: every NATS subject, request/response shape, the request↔job handshake, and the one-way signal port. |
 | [docs/jobs-and-commands.md](docs/jobs-and-commands.md) | The `Job` API in depth — progress, done, context read/write, routing, extrinsics svc calls, and the signal port (`OnSignal`). |
+| [docs/external-job-identity.md](docs/external-job-identity.md) | Advanced: running a job under an external service's own job id — middleware that names the job, cancellation that reaches the service, and the distributed-transaction model behind it. |
+| [docs/detached-work.md](docs/detached-work.md) | Advanced: work that outlives the flow run — the plugin as an async function and the flow as observer, through `_registry` and a "not yet" port. |
 | [docs/form-builder.md](docs/form-builder.md) | Building action & settings UIs with JSON Forms + `x-inflow-ui`. |
 | [docs/examples.md](docs/examples.md) | Annotated walkthrough of the `HTTP.CALL` and `RPC` sample plugins. |
 | [docs/inflow-ecosystem.md](docs/inflow-ecosystem.md) | Working notes on the broader Inflowenger platform (seed for the full ecosystem doc). |

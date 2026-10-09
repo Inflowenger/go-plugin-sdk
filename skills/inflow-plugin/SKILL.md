@@ -154,27 +154,105 @@ registered via `inflow-fusion`, a different repo, and are out of scope here.
    Full contract: `docs/form-builder.md` and the catalog's `dependent-fields.md`
    (that doc still describes the pre-`x-inflow-notif` status-field workaround;
    the notification channel above supersedes it).
-6. **Only if in-flight work must stop with the process**, declare that action's
-   handler cancelable:
+6. **Only if in-flight work must stop with the process**, compose the `jobstop`
+   capability onto that action and the signal port, before `Start()`:
    ```go
-   RequestHandler: sdkv1.NewCancelableJobHandler(func(ctx context.Context, job sdkv1.Job) {
-       // pass ctx down; on ctx.Err() != nil just return (do not Done)
-   }),
+   var stops jobstop.Registry          // github.com/Inflowenger/go-plugin-sdk/jobstop
+   p.OnSignal(stops.OnSignal)          // cancels the job a Canceled() signal names
+   p.AddAction(sdkv1.Action{
+       Method: "run",
+       Middleware: sdkv1.Use(stops.Middleware), // this action only
+       RequestHandler: func(job sdkv1.Job) {
+           ctx := job.Context()        // pass ctx down; on ctx.Err() != nil just return (do not Done)
+       },
+   })
    ```
-   `ctx` is cancelled when the flow is stopped / times out / goes idle. The SDK
-   routes the stop itself — no `OnSignal`, no `sync.Map` of cancel funcs; do not
-   hand-write one. The job cleans up on its own: `Done`/`DoneWithError…`, a stop,
-   or the handler returning all release it. Cancellation is per `jobId`: the
-   plugin's one signal subject carries every flow's (and every replica's)
-   endings, and a stop for a job this process does not hold is a no-op.
-   This is **optional and not the default**: a plain handler's job deliberately
-   keeps running after a stop, because a later run of the node may build on its
-   progress (the previous `jobId` comes back in `_registry`). Wrap only actions
-   with a stream to close, an upstream call to abort, a lock to release. Once
-   `ctx` is cancelled the runtime no longer answers that job's commands — do not
-   try to `Done` it. (`p.OnSignal` remains for *observing* how processes end;
-   signals arrive on success too, so filter on `sig.Conclusion`.)
-7. **Build & run**: `go build ./...`, then `go run .`; the SDK logs each subscribed
+   Use it; do not hand-write a `sync.Map` of cancel funcs. Without
+   `p.OnSignal(stops.OnSignal)` no stop arrives (`Start` logs "Signals not
+   subscribed"). Middleware runs before the runtime knows the jobId, so no stop
+   is ever lost. This is **optional and
+   not the default**: a job without it deliberately keeps running after a stop,
+   because a later run of the node may build on its progress (the previous
+   `jobId` comes back in `_registry`). Add it only for a stream to close, an
+   upstream call to abort, a lock to release. Other per-job capabilities — a
+   long-running job kept in your own map, a trace around the handler — are
+   middleware functions of your own
+   (`func(ctx, job) (context.Context, error)`, run in order before the job is
+   accepted; register there, clean up with `context.AfterFunc(ctx, …)`; an
+   error rejects), listed with `sdkv1.Use(…)` on an action or `p.Use(…)` on
+   every action; several signal
+   handlers compose with `sdkv1.ChainSignals(…)`. Once a stop cancels `ctx`, the runtime no longer
+   answers that job's commands — do not try to `Done` it.
+7. **If the plugin fronts a service that names work itself** (a Joern HTTP
+   server answering `POST /query` with a `queryId`, a render farm, a scan),
+   **do not keep a `map[jobId]upstreamId`.** Register upstream in a middleware
+   function and bind the id it returns as the job's own — middleware runs before
+   the job is accepted, so that id is what the runtime is told:
+   ```go
+   func registerQuery(ctx context.Context, job sdkv1.Job) (context.Context, error) {
+       in, err := sdkv1.CastRequestTo[QueryInput](job.Req.Data)
+       if err != nil {
+           return nil, err // an error here rejects the request: the node never ran
+       }
+       if prev, ok := in.Registry["jobId"].(string); ok && joern.Alive(ctx, prev) {
+           return sdkv1.WithJobIDContext(ctx, prev), nil // reattach, don't duplicate
+       }
+       queryId, err := joern.Register(ctx, in.Body.Project, in.Body.Query)
+       if err != nil {
+           return nil, err
+       }
+       return sdkv1.WithJobIDContext(ctx, queryId), nil
+   }
+   // namer FIRST — stops.Middleware files the job under job.JobId as of when it runs
+   Middleware: sdkv1.Use(registerQuery, stops.Middleware),
+   ```
+   One name then serves both systems: `job.JobId`, every command subject, the
+   stop signal's `jobId`, and the next run's `_registry["jobId"]`. The abort
+   needs no local state — `joern.Cancel(ctx, sig.JobId)` in the signal handler,
+   so any replica that hears the stop can forward it. Rules: the namer comes
+   **before** anything keyed on the jobId; validate the adopted id — at least
+   **10 characters** (fractal-core rejects a shorter one: `init failed. invalid
+   job ID`), a usable NATS subject token (no `.`, space, `*`, `>`), unique
+   plugin-wide; keep
+   the registration call fast and timeout-bounded (the runtime is waiting for
+   the jobId); reject from middleware when there is nothing to report, accept and
+   `job.DoneWithError` when the flow should see a failed node. If the service
+   accepts a client-supplied id instead, do the mirror image — keep the SDK's
+   uuid and send `job.JobId` upstream. Full treatment:
+   [`docs/external-job-identity.md`](https://github.com/Inflowenger/go-plugin-sdk/blob/main/docs/external-job-identity.md).
+8. **If the external work takes longer than a flow run** (hours: a CPG build, a
+   render, a nightly scan), **do not block the job.** The runtime waits 15s for
+   the `jobId`, abandons a job that sends no command for the node's `idle_min`,
+   and ends the run at `ExecuteTimeOut`. Report state and end instead — the
+   plugin is an async function, the flow an observer:
+   ```go
+   // accept stage: the only inputs are body and _registry (the node's memory of
+   // its own previous run; job commands need a jobId, which this decides)
+   if prev, ok := in.Registry["jobId"].(string); ok && prev != "" && joern.Has(ctx, prev) {
+       return sdkv1.WithJobIDContext(ctx, prev), nil // observe; start nothing
+   }
+   // handler:
+   case !status.Done:
+       job.CmdNextFilter([]string{"pending"})   // a SUCCESSFUL "not yet" — never DoneWithError
+       job.Done(map[string]any{"state": "running", "percent": status.Percent}, "joern")
+   default:
+       job.CmdNextFilter([]string{"ready"})
+       job.Done(map[string]any{"result": status.Result}, "joern") // commit, with a key
+   ```
+   Declare the ports (`Outbound: []sdkv1.OutboundPort{{Title: "Still running",
+   Tags: []string{"pending"}}, …}`) so the canvas shows them, and route
+   `_exception` + `DoneWithErrorData` when the work failed upstream. Rules: the
+   state snapshot must be **committed** (`Done(data, key)` — a bare `Done`
+   commits nothing); `_registry` is per **call site** and lives in the context
+   document, so re-entry must be over the **same context** (a Continue
+   After/delay node on the pending branch, a schedule, or a loop edge) and the
+   loop needs a floor (attempt counter, or a `reqAt` age limit); `doneAt` /
+   `conclusion` describe the *run*, not the work — a pending run ends `done`;
+   handle the **stale handle** (service forgot the id → start fresh); and add
+   **no** `stops.Middleware` to an observer action, because outliving the flow is
+   the point. Full treatment:
+   [`docs/detached-work.md`](https://github.com/Inflowenger/go-plugin-sdk/blob/main/docs/detached-work.md).
+9. **Build & run**: `go build ./...`, then `go run .`; the SDK logs each subscribed
    subject on startup. Verify by adding the node to a flow and running it.
 
 ## Known limitations to respect

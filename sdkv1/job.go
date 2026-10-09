@@ -1,6 +1,7 @@
 package sdkv1
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -15,12 +16,31 @@ type Job struct {
 	Action string
 	JobId  string
 	Req    Request
-	// release ends this job's context and unfiles it from its plugin's
-	// registry, set when NewCancelableJobHandler files the job and run by
-	// Command on the terminal command. A func value, so every copy of the job
-	// handed on from then — a helper taking the job by value and calling Done —
-	// still releases it. Nil for a job declared with a plain JobHandler.
-	release func()
+	ctx    context.Context
+}
+
+// Context is the job's context: the one its middleware passed down (see
+// Middleware), carrying the jobId (JobIDFromContext) and whatever the middleware
+// bound to it, and ended by the SDK when the handler returns. A job built by
+// hand answers context.Background().
+//
+// Like an http.Request's, it lives as long as the handler: work the handler
+// leaves running after it returns must not hold it — derive that work's context
+// with context.WithoutCancel, which keeps the values (a trace) and drops the
+// cancellation.
+func (j Job) Context() context.Context {
+	if j.ctx == nil {
+		return context.Background()
+	}
+	return j.ctx
+}
+
+// WithContext returns a copy of the job carrying ctx as its Context(). The SDK
+// uses it to hand a handler what its middleware passed down; a handler can use
+// it to pass a narrowed context along with the job.
+func (j Job) WithContext(ctx context.Context) Job {
+	j.ctx = ctx
+	return j
 }
 
 func (j *Job) Done(data map[string]any, key ...string) any {
@@ -129,16 +149,6 @@ func (j *Job) CmdSetOnPath(jsonPath string, data map[string]any) any {
 	return msg.Data
 }
 func (j *Job) Command(cmd Command, data CommandPayload) any {
-
-	// A terminal command ends the process — the runtime concludes a job on
-	// progress above 99 and on nothing else (next_tags only records routing) —
-	// so a job filed by NewCancelableJobHandler leaves the registry here. Deferred, so
-	// the command is on the wire before the job's context is released, and
-	// unconditional on the outcome: the handler has declared the job over and
-	// will not report on it again.
-	if cmd == ProgressCommand && data.Progress > 99 && j.release != nil {
-		defer j.release()
-	}
 
 	sub := j.makeJobSubject(cmd)
 	dataByte, err := sonic.Marshal(data)

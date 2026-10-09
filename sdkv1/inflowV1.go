@@ -1,6 +1,7 @@
 package sdkv1
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"maps"
@@ -8,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/bytedance/sonic"
-	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 )
 
@@ -154,18 +154,33 @@ func (p *Plugin) metaFunchandler() {
 	}
 }
 
-// signalsHandler subscribes the whole signal port, `inflow.plugin.<PLUGIN_ID>.>`,
-// for every plugin, whether or not it called OnSignal: the SDK is a listener in
-// its own right, routing stops to the jobs running under NewCancelableJobHandler
-// — and it cannot tell from a JobHandler whether it is one, so it cannot skip
-// the port for a plugin that has none. See dispatchSignal.
+// signalsHandler subscribes the registered signal handler (Plugin.OnSignal) to
+// the whole signal port, `inflow.plugin.<PLUGIN_ID>.>`. A plugin that never
+// called OnSignal subscribes to nothing — the port is opt-in.
 func (p *Plugin) signalsHandler() error {
+	if p.signalFn == nil {
+		log.Print(p.signalPortNote())
+		return nil
+	}
 	conn := p.infraConn.GetConnection()
 	if conn == nil {
 		return fmt.Errorf("connection error occurred")
 	}
+	handler := p.signalFn
 	_, err := conn.Subscribe(p.makeSignalSubject(), func(msg *nats.Msg) {
-		p.dispatchSignal(p.parseSignal(msg))
+		sig := p.parseSignal(msg)
+		// Off the dispatch goroutine, like a job handler: a signal handler that
+		// blocks (closing a stream, aborting an upstream call) must not stall
+		// the signals that follow it, and nats.go does not recover panics in a
+		// callback, so an unguarded one would take the whole plugin down.
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("signal handler panicked on %s: %v", sig.Subject, r)
+				}
+			}()
+			handler(sig)
+		}()
 	})
 	if err != nil {
 		log.Printf("subscribe error: %s on %s\n", err.Error(), p.makeSignalSubject())
@@ -175,30 +190,26 @@ func (p *Plugin) signalsHandler() error {
 	return nil
 }
 
-// dispatchSignal hands one signal to its two listeners, in order. First the
-// SDK's own: a stop for a job this process runs under NewCancelableJobHandler
-// cancels that job — inline, because cancelling never blocks, and because the
-// job should be stopping before any handler of the plugin's reacts to the stop.
-// Then the handler registered with OnSignal, if any.
-func (p *Plugin) dispatchSignal(sig Signal) {
-	p.cancels.handleSignal(sig)
-
-	handler := p.signalFn
-	if handler == nil {
-		return
+// signalPortNote is what Start logs when no OnSignal handler is registered. The
+// port then has no subscription, so no signal reaches the plugin — harmless for
+// most plugins, but a stop capability added as middleware (jobstop's) then
+// silently never fires. Naming where middleware is added points at the likely
+// victims.
+func (p *Plugin) signalPortNote() string {
+	note := fmt.Sprintf("Signals not subscribed on : %s (no OnSignal handler registered: no stop will reach any job)", p.makeSignalSubject())
+	if len(p.middlewares) > 0 {
+		note += "; plugin middleware is set"
 	}
-	// Off the dispatch goroutine, like a job handler: a signal handler that
-	// blocks (closing a stream, aborting an upstream call) must not stall the
-	// signals that follow it, and nats.go does not recover panics in a
-	// callback, so an unguarded one would take the whole plugin down.
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("signal handler panicked on %s: %v", sig.Subject, r)
-			}
-		}()
-		handler(sig)
-	}()
+	var withMiddleware []string
+	for _, action := range p.actions {
+		if len(action.Middleware) > 0 {
+			withMiddleware = append(withMiddleware, action.Method)
+		}
+	}
+	if len(withMiddleware) > 0 {
+		note += "; actions with middleware: " + strings.Join(withMiddleware, ", ")
+	}
+	return note
 }
 
 // parseSignal turns a raw signal message into a Signal: Kind is whatever the
@@ -253,13 +264,7 @@ func (p *Plugin) actionsHandler() {
 		log.Printf("Form Builder Service : %s", p.makeFormSubject(action.Method))
 		// request handler make a jobId and respond it with the result
 		_, err = conn.Subscribe(p.makeActionCpu(action.Method), func(msg *nats.Msg) {
-			if action.RequestHandler == nil {
-				(&ActionRequest{Action: action.Method}).Reject(msg, `{"error":"action not implemented"}`)
-				return
-			}
-			jId := uuid.New().String()
-			newReq := ActionRequest{JobId: jId, Action: action.Method, Req: Request{Data: slices.Clone(msg.Data), Header: maps.Clone(msg.Header), Plugin: p}}
-			WithJobHandler(action.RequestHandler)(newReq, msg)
+			p.dispatchAction(action, msg)
 		})
 		if err != nil {
 			log.Printf("subscribe error: %s on %s\n", err.Error(), p.makeActionCpu(action.Method))
@@ -268,6 +273,83 @@ func (p *Plugin) actionsHandler() {
 		log.Printf("Subscribed Action : %s", p.makeActionCpu(action.Method))
 	}
 
+}
+
+// dispatchAction starts one execution request's pipeline on a goroutine of its
+// own, so neither its middleware nor its handler holds up the requests behind
+// it on the subscription.
+func (p *Plugin) dispatchAction(action Action, msg *nats.Msg) {
+	if action.RequestHandler == nil {
+		(&ActionRequest{Action: action.Method}).Reject(msg, `{"error":"action not implemented"}`)
+		return
+	}
+	req := Request{Data: slices.Clone(msg.Data), Header: maps.Clone(msg.Header), Plugin: p}
+	go p.runPipeline(action, req, msg)
+}
+
+// runPipeline runs a request's middleware functions in order (Plugin.pipeline),
+// then accepts the job — replies the jobId — and runs the handler. The job's
+// context begins here and ends when this returns: once the handler has, or as
+// soon as the request is rejected.
+func (p *Plugin) runPipeline(action Action, req Request, msg *nats.Msg) {
+	ctx, end := context.WithCancel(context.Background())
+	defer end()
+
+	ctx, job, err := p.runMiddleware(action, ctx, Job{plugin: p, Action: action.Method, Req: req})
+	if err != nil {
+		p.rejectRequest(action, msg, err)
+		return
+	}
+
+	ar := ActionRequest{JobId: job.JobId, Action: job.Action, Req: job.Req}
+	accepted := ar.Accept(msg).WithContext(ctx)
+	defer func() {
+		// Accepted: the runtime is waiting on the job, so a panic is its failure.
+		if r := recover(); r != nil {
+			accepted.DoneWithError(fmt.Sprintf("plugin handler panicked: %v", r))
+		}
+	}()
+	action.RequestHandler(accepted)
+}
+
+// runMiddleware runs the request's middleware functions in order, each on the
+// context the one before returned, keeping Job.JobId in step with the jobId
+// bound to the context. The first error — or panic — stops it, and so does a
+// job no function named.
+func (p *Plugin) runMiddleware(action Action, ctx context.Context, job Job) (context.Context, Job, error) {
+	for _, fn := range p.pipeline(action) {
+		next, err := runMiddlewareFunc(fn, ctx, job)
+		if err != nil {
+			return nil, job, err
+		}
+		if next != nil {
+			ctx = next
+		}
+		if id := JobIDFromContext(ctx); id != "" {
+			job.JobId = id
+		}
+	}
+	if job.JobId == "" {
+		return nil, job, fmt.Errorf("no jobId: the first middleware function (JobID, or WithJobID's) bound none")
+	}
+	return ctx, job, nil
+}
+
+// runMiddlewareFunc runs one middleware function, answering a panic as its
+// error so the request is rejected rather than the plugin taken down.
+func runMiddlewareFunc(fn MiddlewareFunc, ctx context.Context, job Job) (out context.Context, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			out, err = nil, fmt.Errorf("middleware panicked: %v", r)
+		}
+	}()
+	return fn(ctx, job)
+}
+
+// rejectRequest answers a request with err instead of a jobId.
+func (p *Plugin) rejectRequest(action Action, msg *nats.Msg, err error) {
+	reason, _ := sonic.Marshal(map[string]string{"error": err.Error()})
+	(&ActionRequest{Action: action.Method}).Reject(msg, string(reason))
 }
 
 func (p *Plugin) makeActionSubject(action string) string {
