@@ -328,6 +328,23 @@ p.OnSignal(func(sig sdkv1.Signal) {
 Register it **before `Start()`** — `Start()` does the subscribing. `OnSignal(nil)`
 installs a handler that just logs the port, which is handy while developing.
 
+Registering a handler of your own replaces that logging — the port goes quiet
+just as the plugin starts acting on it. `sdkv1.LogSignals("<plugin>")` is that
+same line as a handler you can keep beside your own:
+
+```go
+p.OnSignal(sdkv1.ChainSignals(sdkv1.LogSignals("ai-decision"), stops.OnSignal))
+// ai-decision: signal proc job=<uuid> conclusion=flow_stop_by_user canceled=true succeeded=false
+// jobstop: job <uuid> cancelled: the runtime concluded its process flow_stop_by_user
+```
+
+Two lines, because they are two events: the signal **arriving**, and a job of
+this process being **cut short** by it — the second comes from
+`jobstop.Registry.OnSignal`, which logs only the jobs it holds. One subject
+carries every signal of the plugin, so the first line also appears for jobs of
+other flows, and of other replicas, that this process never accepted; those get
+no second line.
+
 ```go
 type Signal struct {
     Kind       PluginSignal // "proc" — the subject past inflow.plugin.<PLUGIN_ID>.

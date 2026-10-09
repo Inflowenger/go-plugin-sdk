@@ -49,6 +49,7 @@ package jobstop
 import (
 	"context"
 	"errors"
+	"log"
 	"sync"
 
 	"github.com/Inflowenger/go-plugin-sdk/sdkv1"
@@ -93,8 +94,13 @@ func (r *Registry) Middleware(ctx context.Context, job sdkv1.Job) (context.Conte
 // OnSignal is an sdkv1.SignalHandler. A process signal for a job this registry
 // holds unfiles it, and when its conclusion is Canceled() — flow_stop_by_user,
 // stop_command, timeout, long_time_without_command — cancels its context with
-// ErrStopped. Any other ending (done, failure, …) leaves the context alone: the
-// job has finished or is finishing on its own, and must not be cut short.
+// ErrStopped and logs the jobId and that conclusion. Any other ending (done,
+// failure, …) leaves the context alone, and logs nothing: the job has finished
+// or is finishing on its own, and must not be cut short.
+//
+// Only a job this registry holds is logged, so the line always means work of
+// this process was cut short — the signals of other flows' and other replicas'
+// jobs, which arrive on the same subject, pass in silence.
 func (r *Registry) OnSignal(sig sdkv1.Signal) {
 	if sig.Kind != sdkv1.RuntimeProcessSignal || sig.JobId == "" {
 		return
@@ -104,6 +110,11 @@ func (r *Registry) OnSignal(sig sdkv1.Signal) {
 		return // somebody else's job — another flow's, another replica's
 	}
 	if sig.Conclusion.Canceled() {
+		// Logged because this is the one moment the plugin's own work is cut
+		// short from outside: the handler just sees its context end, so without
+		// a line here a stopped job is indistinguishable in the log from one
+		// that wound down by itself.
+		log.Printf("jobstop: job %s cancelled: the runtime concluded its process %s", sig.JobId, sig.Conclusion)
 		v.(*entry).cancel(ErrStopped)
 	}
 }

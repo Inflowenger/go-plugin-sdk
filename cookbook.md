@@ -417,6 +417,11 @@ Gotchas:
   stopped handler's `Progress`/`Done` will find no responder. Wind down quietly.
 - Handlers run on their own goroutine; only the last one registered is kept —
   compose several with `sdkv1.ChainSignals`.
+- Registering your own handler replaces the logging `OnSignal(nil)` gives you.
+  Chain `sdkv1.LogSignals("<plugin>")` to keep a line per signal that arrives:
+  `p.OnSignal(sdkv1.ChainSignals(sdkv1.LogSignals("my-plugin"), stops.OnSignal))`.
+  `jobstop` logs the other half — the job it actually cancelled — so a signal
+  with no cancel line beside it was not about work this process is running.
 
 Full treatment: [docs/jobs-and-commands.md § Signals](docs/jobs-and-commands.md#signals--when-the-runtime-ends-a-process).
 

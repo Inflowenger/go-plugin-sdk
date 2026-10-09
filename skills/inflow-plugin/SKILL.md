@@ -181,7 +181,10 @@ registered via `inflow-fusion`, a different repo, and are out of scope here.
    accepted; register there, clean up with `context.AfterFunc(ctx, …)`; an
    error rejects), listed with `sdkv1.Use(…)` on an action or `p.Use(…)` on
    every action; several signal
-   handlers compose with `sdkv1.ChainSignals(…)`. Once a stop cancels `ctx`, the runtime no longer
+   handlers compose with `sdkv1.ChainSignals(…)` — chain
+   `sdkv1.LogSignals("<plugin>")` to keep a log line per arriving signal, which
+   registering a handler of your own otherwise replaces (`jobstop` logs the
+   cancel itself). Once a stop cancels `ctx`, the runtime no longer
    answers that job's commands — do not try to `Done` it.
 7. **If the plugin fronts a service that names work itself** (a Joern HTTP
    server answering `POST /query` with a `queryId`, a render farm, a scan),
